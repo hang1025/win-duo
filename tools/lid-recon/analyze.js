@@ -104,6 +104,12 @@
     const closeRho = spearman(close.map((s) => [s.t, s.v]));
     const reopenRho = spearman(reopen.map((s) => [s.t, s.v]));
 
+    // How far the value wandered while the lid was supposed to be held shut.
+    // This is the number that decides whether the effect can sit on an angle
+    // without creeping, so it is reported rather than folded into a score.
+    const hold = levels(samples, p.shutFrom + 300, p.shutTo);
+    const holdDrift = hold.length >= 2 ? Math.abs(hold[hold.length - 1] - hold[0]) : 0;
+
     const size = Math.floor(close.length / 3);
     const thirds = [0, 1, 2].map((i) => {
       const part = close.slice(i * size, i === 2 ? close.length : (i + 1) * size);
@@ -124,6 +130,10 @@
       snr: Math.abs(swing) / noise,
       closeRho,
       reopenRho,
+      holdDrift,
+      // Drift while held, as a fraction of the whole travel. A tracker that
+      // creeps makes the effect move on its own.
+      holdDriftRatio: holdDrift / Math.max(Math.abs(swing), 1e-9),
       // A signal that tracks the lid must run one way while closing and the
       // other way while opening.
       reverses: Number.isFinite(closeRho) && Number.isFinite(reopenRho)
@@ -137,21 +147,32 @@
     if (!usable.length) return { verdict: 'no data', score: 0 };
 
     const snr = median(usable.map((c) => c.snr));
+    const holdDriftRatio = median(usable.map((c) => c.holdDriftRatio));
     const monotone = usable.filter((c) => Math.abs(c.closeRho) > 0.8).length;
     const reversing = usable.filter((c) => c.reverses && Math.abs(c.closeRho) > 0.8).length;
     const bestThird = Math.max(...usable.map((c) => Math.max(...c.thirds.map((t) => (
       Number.isFinite(t.rho) ? Math.abs(t.rho) * Math.min(t.travel, 1) : 0
     )))));
 
+    // 80% of the cycles, and never fewer than three, so that a short run is
+    // scored on the same terms as a long one.
+    const need = Math.max(3, Math.ceil(usable.length * 0.8));
+    const soft = Math.max(2, Math.ceil(usable.length * 0.6));
+
     let verdict = 'not usable';
-    if (reversing >= 4 && monotone >= 4 && snr > 3) verdict = 'tracks the lid';
-    else if (reversing >= 3 && snr > 2) verdict = 'weak but promising';
-    else if (bestThird > 0.75 && snr > 2) verdict = 'only part of the range';
+    if (reversing >= need && monotone >= need && snr > 3 && holdDriftRatio < 0.25) {
+      verdict = 'tracks the lid';
+    } else if (reversing >= soft && snr > 2) {
+      verdict = 'weak but promising';
+    } else if (bestThird > 0.75 && snr > 2) {
+      verdict = 'only part of the range';
+    }
 
     return {
       verdict,
       score: reversing,
       snr,
+      holdDriftRatio,
       monotone,
       reversing,
       bestThird,
