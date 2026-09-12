@@ -11,9 +11,7 @@
 
 | 下载方式 | 链接 |
 |---|---|
-| **百度网盘**（国内推荐） | **[WinDuo-0.1.0.zip](通过网盘分享的文件：win duo
-链接: https://pan.baidu.com/s/1tDfUUz9QfUJrZYEEq9Bzww?pwd=1y3c 提取码: 1y3c 
---来自百度网盘超级会员v1的分享)**　 |
+| **百度网盘**（国内推荐） | **[WinDuo-0.1.0.zip](通过网盘分享的文件：win duo 链接: https://pan.baidu.com/s/1tDfUUz9QfUJrZYEEq9Bzww?pwd=1y3c 提取码: 1y3c --来自百度网盘超级会员v1的分享)**　 |
 | **GitHub Releases** | [最新版](../../releases/latest)（不用登录，但国内可能慢） |
 
 下载下来是一个压缩包，**解压后双击里面的 `WinDuo-Portable-0.1.0.exe`** 就能用。
