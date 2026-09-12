@@ -79,9 +79,16 @@ function inQuad(px, py, quad) {
 }
 
 /**
- * A folded screen: two panels meeting at a bright crease, the far one dimmer so
- * the fold reads at 16 px.
+ * A folded screen: two panels meeting at a gap, the far one dimmer so the fold
+ * reads at 16 px.
+ *
+ * Both panels are the same blue rather than white, because a white glyph
+ * disappears on a light taskbar and a black one disappears on the default dark
+ * one. Saturation is what survives both.
  */
+const NEAR = [91, 140, 255, 255];
+const FAR = [91, 140, 255, 120];
+
 function drawIcon(size) {
   const rgba = Buffer.alloc(size * size * 4, 0);
   const s = size / 32;
@@ -103,23 +110,17 @@ function drawIcon(size) {
     for (let x = 0; x < size; x += 1) {
       const px = x + 0.5;
       const py = y + 0.5;
-      let alpha = 0;
-      let level = 0;
+      let colour = null;
 
-      if (inQuad(px, py, near)) {
-        alpha = 255;
-        level = 255;
-      } else if (inQuad(px, py, far)) {
-        alpha = 255;
-        level = 140;
-      }
+      if (inQuad(px, py, near)) colour = NEAR;
+      else if (inQuad(px, py, far)) colour = FAR;
 
-      if (alpha === 0) continue;
+      if (!colour) continue;
       const offset = (y * size + x) * 4;
-      rgba[offset] = level;
-      rgba[offset + 1] = level;
-      rgba[offset + 2] = level;
-      rgba[offset + 3] = alpha;
+      rgba[offset] = colour[0];
+      rgba[offset + 1] = colour[1];
+      rgba[offset + 2] = colour[2];
+      rgba[offset + 3] = colour[3];
     }
   }
 

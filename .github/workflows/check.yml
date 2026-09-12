@@ -1,0 +1,34 @@
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Every source file has to parse everywhere, including the shared strings
+      # module that is loaded both as CommonJS and as a classic script.
+      - name: Parse every source file
+        run: |
+          set -e
+          find src tools -name '*.js' -print0 | xargs -0 -n1 node --check
+          echo "all files parsed"
+
+      # --ignore-scripts skips the Electron binary download: this job only
+      # checks that the manifest and the lockfile are consistent.
+      - name: Install without downloading Electron
+        run: npm install --ignore-scripts --no-audit --no-fund
+
+# The deeper checks - `npm run selftest`, `verify`, `check:settings`, `timing` -
+# are deliberately local. They need a real display, a GPU that can do WebGL2, and
+# in the case of `verify` a screen to look at, none of which a hosted runner has.
+# They are described in the README.

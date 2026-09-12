@@ -109,7 +109,7 @@ async function checkSettings({ prefs, wait }) {
     console.log(`FAIL: ${problems.join('; ')}`);
     return 1;
   }
-  console.log(`PASS: the settings page builds in ${Object.keys(strings.en.params).length * 2 + 8} strings across both languages and reports no errors.`);
+  console.log('PASS: the settings page builds in both languages, round-trips a setting, and reports no errors.');
   return 0;
 }
 
