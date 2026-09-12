@@ -57,7 +57,11 @@ async function runSelfTest({ prefs, real = false }) {
     if (!captured) throw new Error('the screen capture returned nothing');
   }
 
-  const settings = prefs.all;
+  // The renderer is driven directly here, so the scripted path is used - but
+  // with the camera's start angle, so the dumps show what camera mode produces
+  // once the lid is at the angle the effect armed at.
+  const base = prefs.all;
+  const settings = { ...base, angleSource: 'sweep', thresholdAngle: base.restAngle };
   const payload = {
     settings,
     synthetic: !real,
@@ -77,7 +81,10 @@ async function runSelfTest({ prefs, real = false }) {
   await new Promise((resolve) => setTimeout(resolve, 300));
   await win.webContents.executeJavaScript('window.__winDuoSelftest.prepareStored()');
 
-  const angles = [130, 110, 90, 80, 72, 60, 50, 45, 30, 20];
+  // Chosen to bracket the window a laptop flat on a desk actually shows: the
+  // screen faces the user at about 105 degrees and stops being readable around
+  // 60, so that is where the effect has to do its work.
+  const angles = [130, 105, 95, 85, 75, 65, 55, 45, 30];
   for (const angle of angles) {
     const dataUrl = await win.webContents.executeJavaScript(
       `window.__winDuoSelftest.renderAt(${angle})`,

@@ -22,16 +22,47 @@
         width: 100vw;
         height: 100vh;
       }
+      /* Overlays drawn in the DOM, not in the canvas: they have to be readable
+         while the canvas is still fully transparent, waiting for the lid. */
+      #hint,
+      #readout {
+        position: fixed;
+        padding: 6px 12px;
+        border-radius: 999px;
+        font: 13px/1.4 "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+        color: #eef1f7;
+        background: rgba(18, 20, 26, 0.82);
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 260ms ease;
+        white-space: nowrap;
+      }
+      #hint {
+        left: 50%;
+        bottom: 64px;
+        transform: translateX(-50%);
+        font-size: 15px;
+      }
+      #readout {
+        left: 18px;
+        bottom: 18px;
+        font: 12px/1.4 Consolas, "Cascadia Mono", monospace;
+        color: #9fc0ff;
+      }
     </style>
   </head>
   <body>
     <canvas id="view"></canvas>
+    <div id="hint"></div>
+    <div id="readout"></div>
 
     <script src="lib/homography.js"></script>
     <script src="lib/geometry.js"></script>
     <script src="lib/spring.js"></script>
     <script src="lib/gradient.js"></script>
     <script src="lib/shader.js"></script>
+    <script src="lib/lid-tracker.js"></script>
     <script src="overlay.js"></script>
   </body>
 </html>

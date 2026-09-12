@@ -192,6 +192,48 @@
   let framesDrawn = 0;
   let lastError = null;
   let timings = null;
+  /** The webcam tracker, in camera mode only. */
+  let tracker = null;
+  /** Spring that smooths the tracked progress, so sensor noise cannot jitter it. */
+  let trackerSpring = null;
+
+  const hintElement = document.getElementById('hint');
+  const readoutElement = document.getElementById('readout');
+  let hintTimer = 0;
+
+  function showHint(text, ms = 4000) {
+    if (!hintElement) return;
+    hintElement.textContent = text;
+    hintElement.style.opacity = '1';
+    if (hintTimer) window.clearTimeout(hintTimer);
+    if (ms > 0) hintTimer = window.setTimeout(() => { hintElement.style.opacity = '0'; }, ms);
+  }
+
+  function hideHint() {
+    if (!hintElement) return;
+    if (hintTimer) window.clearTimeout(hintTimer);
+    hintElement.style.opacity = '0';
+  }
+
+  function updateReadout() {
+    if (!readoutElement || !state) return;
+    if (!state.settings.showAngleReadout) {
+      readoutElement.style.opacity = '0';
+      return;
+    }
+    readoutElement.style.opacity = '1';
+    if (state.mode === 'camera') {
+      readoutElement.textContent = [
+        `角度 ${state.angle.toFixed(1)}°`,
+        `行程 ${state.travel.toFixed(1)} / ${Number(state.settings.fullTravel).toFixed(0)}`,
+        `${(state.progress * 100).toFixed(0)}%`,
+        `q${state.quality.toFixed(2)} ${state.usedStrips}/8`,
+        state.releasing ? '收尾中' : (state.engaged ? '跟随中' : '待命'),
+      ].join('  ·  ');
+    } else {
+      readoutElement.textContent = `脚本动画  ${state.angle.toFixed(1)}°`;
+    }
+  }
 
   // The main process can ask what the overlay is doing, which is the only way to
   // tell "the window is up but drawing nothing" from "the window never showed".
@@ -204,11 +246,18 @@
     canvas: `${canvas.width}x${canvas.height} css ${canvas.style.width}x${canvas.style.height}`,
     state: state
       ? {
+        mode: state.mode,
         phase: state.phase,
         opacity: Number(state.opacity.toFixed(3)),
-        angle: Number(state.spring.value.toFixed(2)),
-        openAngle: state.openAngle,
-        shutAngle: state.shutAngle,
+        angle: Number(state.angle.toFixed(2)),
+        progress: Number(state.progress.toFixed(3)),
+        travel: Number(state.travel.toFixed(2)),
+        direction: state.direction,
+        quality: Number(state.quality.toFixed(2)),
+        strips: state.usedStrips,
+        engaged: state.engaged,
+        releasing: state.releasing,
+        peakTravel: Number(state.peakTravel.toFixed(2)),
       }
       : null,
   });
@@ -287,25 +336,8 @@
     return null;
   }
 
-  function frame(now) {
-    rafId = 0;
-    if (!state) return;
-    if (timings && timings.firstFrameMs === null) {
-      timings.firstFrameMs = Math.round(now - state.t0);
-      if (window.winDuoBridge.mark) window.winDuoBridge.mark('first-frame');
-    }
-
-    // Semi-implicit Euler is only stable while frequency * dt stays small.
-    const dt = Math.min(Math.max((now - state.lastTime) / 1000, 1 / 240), 1 / 20);
-    state.lastTime = now;
-
-    const targetOpacity = state.fadingOut ? 0 : 1;
-    const duration = state.fadingOut ? state.settings.fadeOut : state.settings.fadeIn;
-    const step = duration > 0 ? dt / duration : 1;
-    state.opacity = targetOpacity > state.opacity
-      ? Math.min(targetOpacity, state.opacity + step)
-      : Math.max(targetOpacity, state.opacity - step);
-
+  /** The scripted mode: the sweep plays out on its own. */
+  function updateFromSweep(dt, now) {
     const scripted = scriptedAngle(now);
     if (scripted === null && state.phase === 'sweep') state.phase = 'settle';
     state.spring.advance(scripted === null ? state.openAngle : scripted, dt, state.settings.springFrequency);
@@ -318,12 +350,136 @@
       state.spring.reset(state.openAngle);
     }
 
-    render(state.spring.value, state.opacity);
-    framesDrawn += 1;
+    state.angle = state.spring.value;
+    state.progress = NS.gradient.clamp01(
+      (state.startAngle - state.angle) / Math.max(state.settings.blurSpan, 1),
+    );
+  }
 
-    if (state.phase === 'fadeout' && state.opacity <= 0.0005) {
+  /**
+   * The live mode: the angle comes from the webcam tracker.
+   *
+   * The value the tracker reports is accumulated image travel, not degrees. It
+   * is scaled by `fullTravel`, the travel a complete close produces, which is
+   * re-learned from every complete close because it depends on the camera, the
+   * room and where the user sits.
+   */
+  function updateFromCamera(dt, now) {
+    const settings = state.settings;
+
+    const sampled = tracker ? tracker.sample() : null;
+    if (sampled !== null) {
+      state.travel = sampled;
+      state.quality = tracker.quality;
+      state.usedStrips = tracker.usedStrips;
+    }
+
+    const full = Math.max(1, Number(settings.fullTravel) || 170);
+    const engageRows = full * settings.engageFraction;
+    const releaseRows = full * settings.releaseFraction;
+
+    // Which way the scene slides when the lid closes depends on how the camera
+    // is mounted, on how it is rotated, and on where the user is sitting, so the
+    // sign cannot be assumed. It is taken from the largest excursion seen: a
+    // close dwarfs anything else a run produces, and a bigger movement the other
+    // way simply re-latches it.
+    const magnitude = Math.abs(state.travel);
+    if (magnitude > engageRows && magnitude > state.peakMagnitude) {
+      state.peakMagnitude = magnitude;
+      state.direction = Math.sign(state.travel) || state.direction;
+    }
+    const closingTravel = state.travel * state.direction;
+
+    if (!state.engaged && closingTravel > engageRows) {
+      state.engaged = true;
+      state.engagedAt = now;
+      state.phase = 'tracking';
+      hideHint();
+    }
+    if (closingTravel > state.peakTravel) state.peakTravel = closingTravel;
+
+    let target = NS.gradient.clamp01((closingTravel / full) * settings.trackerGain);
+    if (state.releasing) target = 0;
+    trackerSpring.advance(target, dt, settings.trackerSpringFrequency);
+    const progress = NS.gradient.clamp01(trackerSpring.value);
+
+    state.progress = progress;
+    state.angle = Number(settings.restAngle) * (1 - progress);
+
+    if (state.releasing) {
+      if (progress <= 0.004) {
+        // Flat again, so the picture matches the screen behind it and the fade
+        // has nothing to give away.
+        state.fadingOut = true;
+        state.phase = 'fadeout';
+      }
+      return;
+    }
+
+    if (state.engaged && closingTravel < releaseRows && now - state.engagedAt > 500) {
+      beginRelease('back at rest');
+    } else if (!state.engaged && now - state.armedAt > settings.idleReleaseMs) {
+      beginRelease('no lid movement');
+    } else if (now - state.armedAt > settings.maxArmedMs) {
+      beginRelease('armed for too long');
+    }
+  }
+
+  /** Starts the ease back to flat, and turns the camera off straight away. */
+  function beginRelease(reason) {
+    state.releasing = true;
+    state.releaseReason = reason;
+    if (tracker) tracker.close();
+    if (window.winDuoBridge && window.winDuoBridge.mark) {
+      window.winDuoBridge.mark(`release:${reason}`);
+    }
+  }
+
+  function frame(now) {
+    rafId = 0;
+    if (!state) return;
+    if (timings && timings.firstFrameMs === null) {
+      timings.firstFrameMs = Math.round(now - state.t0);
+      if (window.winDuoBridge.mark) window.winDuoBridge.mark('first-frame');
+    }
+
+    // Semi-implicit Euler is only stable while frequency * dt stays small.
+    const dt = Math.min(Math.max((now - state.lastTime) / 1000, 1 / 240), 1 / 20);
+    state.lastTime = now;
+
+    // In camera mode the picture stays completely invisible until the lid
+    // actually moves, so that arming does not freeze the desktop on screen. The
+    // fade-in then lands on an untouched desktop and has nothing to give away.
+    const waiting = state.mode === 'camera' && !state.engaged && !state.releasing;
+    const targetOpacity = state.fadingOut || waiting ? 0 : 1;
+    const duration = state.fadingOut ? state.settings.fadeOut : state.settings.fadeIn;
+    const step = duration > 0 ? dt / duration : 1;
+    state.opacity = targetOpacity > state.opacity
+      ? Math.min(targetOpacity, state.opacity + step)
+      : Math.max(targetOpacity, state.opacity - step);
+
+    if (state.mode === 'camera') updateFromCamera(dt, now);
+    else updateFromSweep(dt, now);
+
+    render(state.angle, state.opacity);
+    framesDrawn += 1;
+    updateReadout();
+
+    if (state.fadingOut && state.opacity <= 0.0005) {
+      const report = {
+        mode: state.mode,
+        engaged: state.engaged,
+        peakTravel: state.peakTravel,
+        reason: state.releaseReason,
+      };
+      const closing = tracker;
       state = null;
-      if (window.winDuoBridge) window.winDuoBridge.finished();
+      tracker = null;
+      trackerSpring = null;
+      if (closing) closing.close();
+      hideHint();
+      if (readoutElement) readoutElement.style.opacity = '0';
+      if (window.winDuoBridge) window.winDuoBridge.finished(report);
       return;
     }
 
@@ -370,25 +526,86 @@
       pixelScale,
     });
 
+    // Camera mode follows the real lid. The picture is flat at `restAngle`,
+    // which is the angle the lid stands at when the effect arms, so the fold
+    // begins the moment the lid moves.
+    const mode = settings.angleSource === 'camera' ? 'camera' : 'sweep';
+    const startAngle = mode === 'camera' ? Number(settings.restAngle) : settings.thresholdAngle;
+
     state = {
       settings,
+      mode,
       pixelScale,
       screenWidth,
       screenHeight,
       paddingPoints: settings.paddingPoints,
       maxLevel: built.maxLevel,
-      // The effect arms at the threshold, so that is the angle the picture is
-      // flat at.
-      startAngle: settings.thresholdAngle,
+      startAngle,
       openAngle: payload.openAngle,
       shutAngle: payload.shutAngle,
       t0: performance.now(),
       lastTime: performance.now(),
+      angle: startAngle,
+      progress: 0,
       opacity: 0,
       fadingOut: false,
-      phase: 'sweep',
+      phase: mode === 'camera' ? 'armed' : 'sweep',
       spring: new NS.Spring(payload.openAngle, settings.springFrequency),
+      // Live tracking state.
+      travel: 0,
+      // +1 or -1: which sign of tracked travel means the lid is closing. Latched
+      // from the first real movement, because it depends on the hardware.
+      direction: 1,
+      peakMagnitude: 0,
+      quality: 0,
+      usedStrips: 0,
+      engaged: false,
+      engagedAt: 0,
+      peakTravel: 0,
+      releasing: false,
+      releaseReason: '',
+      armedAt: performance.now(),
     };
+  }
+
+  /**
+   * Opens the camera and starts tracking. Runs after the picture is up, so the
+   * cost of the camera is not added to the cost of the screen grab.
+   */
+  async function startCamera(payload) {
+    const local = new NS.LidTracker({ synthetic: Boolean(payload.syntheticCamera) });
+    tracker = local;
+    trackerSpring = new NS.Spring(0, state.settings.trackerSpringFrequency);
+
+    const opened = await local.open();
+    if (!state) return;
+
+    if (!opened) {
+      // A dead overlay would be worse than the wrong animation, so fall back to
+      // the scripted sweep and say so.
+      state.mode = 'sweep';
+      state.phase = 'sweep';
+      state.startAngle = state.settings.thresholdAngle;
+      state.spring = new NS.Spring(state.openAngle, state.settings.springFrequency);
+      state.t0 = performance.now();
+      tracker = null;
+      trackerSpring = null;
+      showHint(`摄像头打不开，改用脚本动画：${local.note}`, 6000);
+      return;
+    }
+
+    if (local.synthetic) {
+      // Only present when the tracker is running against a generated scene. It
+      // lets a harness close the lid with no camera and no hand, which is the
+      // only way to test the live path automatically.
+      window.__winDuoTrack = {
+        step(pixels) { local.offset += pixels; return local.offset; },
+        reset() { local.reset(); },
+      };
+    }
+
+    showHint('已待命 · 慢慢合盖', 8000);
+    if (window.winDuoBridge && window.winDuoBridge.mark) window.winDuoBridge.mark('camera-ready');
   }
 
   function play(payload) {
@@ -404,6 +621,8 @@
         firstFrameMs: null,
         bytes: payload.bgra ? payload.bgra.length : 0,
       };
+      if (state.mode === 'camera') startCamera(payload);
+      else showHint('脚本动画', 1500);
       if (!rafId) rafId = window.requestAnimationFrame(frame);
       if (window.winDuoBridge.mark) window.winDuoBridge.mark('picture-built');
     } catch (error) {

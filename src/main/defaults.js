@@ -12,12 +12,47 @@
 const DEFAULTS = {
   enabled: true,
 
+  // --- Angle source ------------------------------------------------------
+  // 'camera' follows the real lid through the built-in webcam; 'sweep' plays
+  // the scripted animation. The camera falls back to the sweep by itself if it
+  // cannot be opened.
+  angleSource: 'camera',
+  // Degrees the lid stands at when the effect arms. A 16" laptop flat on a desk
+  // faces a seated user at roughly this angle, and the effect's trigger angle
+  // should match it, so that closing the lid an inch starts the fold.
+  restAngle: 105,
+  // Tracker rows for a close from restAngle to shut. Only a first guess: it is
+  // re-learned from every complete close, because how far the scene slides
+  // depends on the camera, the room and how the user sits.
+  fullTravel: 170,
+  // Multiplier on the tracked travel, for taste.
+  trackerGain: 1,
+  // Fraction of fullTravel that counts as "the lid is moving" and, once folded,
+  // as "back at rest".
+  engageFraction: 0.03,
+  releaseFraction: 0.06,
+  // Armed with no lid movement for this long, or armed at all for this long,
+  // and the camera goes back off.
+  idleReleaseMs: 15000,
+  maxArmedMs: 300000,
+  // Radians per second of the spring that smooths the tracked progress.
+  trackerSpringFrequency: 16,
+  // Draw the tracked angle in the corner, for checking the tracking by eye.
+  showAngleReadout: true,
+
   // --- Angle -------------------------------------------------------------
-  // The effect arms once the lid passes below this angle. 90 is a lid standing
-  // straight up out of the base.
-  thresholdAngle: 90,
-  // Degrees below the threshold for the blur to reach full strength.
-  blurSpan: 60,
+  // The angle the fold starts at. With the camera as the angle source this is
+  // taken from `restAngle` instead, so that the fold begins the moment the lid
+  // moves.
+  //
+  // 100 rather than Mac Duo's 90: a laptop flat on a desk faces a seated user
+  // at about 105 degrees, so 90 is already well past the point where the panel
+  // starts washing out.
+  thresholdAngle: 100,
+  // Degrees of lid travel from the trigger angle to full blur. Measured against
+  // a flat-on-desk setup, the screen stops being readable around 60-65 degrees,
+  // so the effect has to finish its work before then.
+  blurSpan: 40,
   // Degrees the picture turns away from the glass for each degree of lid
   // travel. 1 pins the picture to the room instead of to the glass.
   recession: 1,
@@ -26,15 +61,21 @@ const DEFAULTS = {
 
   // --- Optics ------------------------------------------------------------
   // Eye distance from the middle of the screen, as a multiple of the screen
-  // height. Higher is a flatter, weaker perspective.
-  viewingDistance: 6,
-  // Gaussian blur radius at full effect, in points.
-  maxBlurRadius: 135,
+  // height. Higher is a flatter, weaker perspective. 3 is what a seated user at
+  // a laptop flat on a desk actually measures: eyes roughly 60 cm from the
+  // hinge, screen height 21.5 cm. Mac Duo ships 6, which assumes a much
+  // stronger viewing distance than a laptop on a desk ever has.
+  viewingDistance: 3,
+  // Gaussian blur radius at full effect, in points. Lower than Mac Duo's 135
+  // because the stronger perspective above already carries most of the motion.
+  maxBlurRadius: 95,
   // Blur at the hinge edge as a fraction of the blur at the far edge. 0 leaves
   // the hinge edge sharp, 1 blurs the picture evenly.
   blurEvenness: 0,
-  // Black overlay opacity where the blur is at full strength, 0...1.
-  maxDim: 1,
+  // Black overlay opacity where the blur is at full strength, 0...1. Not 1:
+  // fully black at the far edge makes the picture vanish while the panel is
+  // still readable, which throws away the last third of the visible window.
+  maxDim: 0.85,
   // Height at which the dimming reaches full strength, as a fraction of the
   // screen height, measured from the hinge edge.
   dimReach: 0.5,

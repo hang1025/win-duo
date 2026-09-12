@@ -16,6 +16,11 @@
   }
 
   const SLIDERS = {
+    'tracking-section': [
+      { key: 'restAngle', min: 80, max: 130, step: 1, unit: '°' },
+      { key: 'trackerGain', min: 0.3, max: 3, step: 0.05, unit: '×' },
+      { key: 'fullTravel', min: 60, max: 400, step: 5, unit: 'row' },
+    ],
     'angle-section': [
       { key: 'thresholdAngle', min: 40, max: 120, step: 1, unit: '°' },
       { key: 'blurSpan', min: 10, max: 100, step: 1, unit: '°' },

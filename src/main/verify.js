@@ -59,9 +59,11 @@ async function verifyOverlay({ trigger, overlay, wait, isPlaying }) {
   // seconds, so the only honest way to sample it is to keep grabbing until the
   // run ends and look at every frame that came back.
   const started = Date.now();
-  const pending = trigger();
   const samples = [];
   const deadline = started + 12000;
+  // The scripted path, not the camera: this check looks at what is on the glass,
+  // and camera mode deliberately shows nothing until the lid moves.
+  const pending = trigger({ angleSource: 'sweep' });
   while (Date.now() < deadline) {
     const frame = await captureDisplay(display);
     const at = Date.now() - started;

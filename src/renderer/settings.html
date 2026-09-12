@@ -133,6 +133,24 @@
     <h1 data-i18n="settings.title"></h1>
     <p class="sub" data-i18n="settings.subtitle"></p>
 
+    <section id="tracking-section">
+      <h2 data-i18n="settings.tracking"></h2>
+      <div class="switches">
+        <div class="switch">
+          <span data-i18n="params.angleSource.label"></span>
+          <select data-key="angleSource">
+            <option value="camera" data-i18n="params.angleSource.camera"></option>
+            <option value="sweep" data-i18n="params.angleSource.sweep"></option>
+          </select>
+        </div>
+        <label class="switch">
+          <span data-i18n="params.showAngleReadout.label"></span>
+          <input type="checkbox" data-key="showAngleReadout" />
+        </label>
+      </div>
+      <div class="hint" data-i18n="params.angleSource.hint"></div>
+    </section>
+
     <section>
       <h2 data-i18n="settings.trigger"></h2>
       <div class="switches">

@@ -10,8 +10,11 @@ contextBridge.exposeInMainWorld('winDuoBridge', {
   onPlay: (callback) => ipcRenderer.on('wd:play', (_event, payload) => callback(payload)),
   /** Settings changed while the overlay is alive. */
   onSettings: (callback) => ipcRenderer.on('wd:settings', (_event, settings) => callback(settings)),
-  /** The sweep is over and the overlay has faded out. */
-  finished: () => ipcRenderer.send('wd:overlay-finished'),
+  /**
+   * The run is over and the overlay has faded out. The report carries what the
+   * tracker saw, so the main process can refine the travel estimate.
+   */
+  finished: (report) => ipcRenderer.send('wd:overlay-finished', report),
   /**
    * Timing marks. `Date.now()` is the same clock in both processes, so the main
    * process can line these up against the moment the hotkey fired.

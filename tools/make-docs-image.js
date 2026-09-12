@@ -12,7 +12,10 @@ const { app, BrowserWindow } = require('electron');
  *
  * It runs the self test first, so the montage always matches the current shader.
  */
-const ANGLES = [110, 90, 72, 45];
+// Four points across the window a laptop flat on a desk actually shows: flat at
+// the rest angle, then three stages of the fold before the panel gives out.
+// These must be angles the self test renders.
+const ANGLES = [105, 95, 85, 65];
 const CELL_WIDTH = 620;
 const CELL_HEIGHT = 388;
 const GAP = 14;

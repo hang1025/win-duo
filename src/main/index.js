@@ -10,6 +10,7 @@ const {
   ipcMain,
   nativeImage,
   screen,
+  session,
   shell,
 } = require('electron');
 
@@ -24,6 +25,7 @@ const strings = require('../shared/strings');
 const ARGS = process.argv.slice(1);
 const IS_SELFTEST = ARGS.includes('--selftest');
 const IS_VERIFY = ARGS.includes('--verify');
+const IS_VERIFY_CAMERA = ARGS.includes('--verify-camera');
 const IS_TIMING = ARGS.includes('--timing');
 const IS_CHECK_SETTINGS = ARGS.includes('--check-settings');
 
@@ -38,6 +40,8 @@ let tray = null;
 let settingsWindow = null;
 let playing = false;
 let runWatchdog = null;
+/** What the last run reported, for the camera verification. */
+let lastRunReport = null;
 let lang = 'en';
 let S = null;
 /** Wall clock at the start of the current run, for timing marks. */
@@ -54,9 +58,9 @@ let runStartedAt = 0;
  * The grab happens *before* the overlay is shown, so the picture can never
  * contain the overlay itself.
  */
-async function trigger() {
+async function trigger(overrides) {
   if (playing || !prefs) return;
-  const settings = prefs.all;
+  const settings = { ...prefs.all, ...(overrides || {}) };
   if (!settings.enabled) return;
 
   runStartedAt = Date.now();
@@ -100,6 +104,7 @@ async function trigger() {
       pixelScale: display.scaleFactor,
       openAngle: sweepOpenAngle(settings),
       shutAngle: sweepShutAngle(settings),
+      syntheticCamera: Boolean(settings.syntheticCamera),
     });
     mark('handed to the overlay');
   } catch (error) {
@@ -108,13 +113,40 @@ async function trigger() {
   }
 }
 
-function endRun() {
+function endRun(report) {
   playing = false;
+  lastRunReport = report || null;
   if (runWatchdog) {
     clearTimeout(runWatchdog);
     runWatchdog = null;
   }
   if (overlay) overlay.hide();
+  calibrateFromRun(report);
+}
+
+/**
+ * Refines the estimate of how much image travel a complete close produces.
+ *
+ * The travel depends on the camera, the room and where the user sits, so it
+ * cannot be a constant. It also cannot be read off a partial close, which would
+ * teach the wrong scale, so only a run that got most of the way to shut and came
+ * back counts. The estimate drifts towards the middle of what is seen rather
+ * than being replaced, because individual closes vary.
+ */
+function calibrateFromRun(report) {
+  if (!prefs || !report || report.mode !== 'camera' || !report.engaged) return;
+  if (report.reason !== 'back at rest') return;
+
+  const peak = Number(report.peakTravel);
+  if (!Number.isFinite(peak) || peak <= 0) return;
+
+  const current = Number(prefs.values.fullTravel) || 170;
+  if (peak < current * 0.6) return;
+
+  const next = Math.round(current * 0.7 + peak * 0.3);
+  if (next === current) return;
+  prefs.update({ fullTravel: next });
+  console.log(`[win-duo] full-travel estimate ${current} -> ${next} (this close measured ${peak.toFixed(1)})`);
 }
 
 // ---------------------------------------------------------------------------
@@ -258,7 +290,7 @@ function registerIpc() {
   ipcMain.handle('wd:preview', () => { trigger(); });
   ipcMain.handle('wd:quit', () => { app.quit(); });
 
-  ipcMain.on('wd:overlay-finished', () => { endRun(); });
+  ipcMain.on('wd:overlay-finished', (_event, report) => { endRun(report); });
 
   ipcMain.on('wd:mark', (_event, name, at) => {
     if (process.env.WIN_DUO_DEBUG) {
@@ -271,10 +303,24 @@ function registerIpc() {
 // Boot
 // ---------------------------------------------------------------------------
 
+/**
+ * The overlay opens the webcam, so the media permissions have to be granted
+ * explicitly: an Electron page loaded from disk is not a secure origin and is
+ * denied by default.
+ */
+function configurePermissions() {
+  const allowed = new Set(['media', 'audioCapture', 'videoCapture', 'display-capture']);
+  session.defaultSession.setPermissionRequestHandler((_contents, permission, callback) => {
+    callback(allowed.has(permission));
+  });
+  session.defaultSession.setPermissionCheckHandler((_contents, permission) => allowed.has(permission));
+}
+
 async function onReady() {
   prefs = new Preferences();
   lang = strings.forLocale(app.getLocale());
   S = strings[lang];
+  configurePermissions();
 
   if (IS_SELFTEST) {
     try {
@@ -310,6 +356,27 @@ async function onReady() {
       app.exit(process.exitCode);
     } catch (error) {
       console.error('[win-duo] timing failed:', error);
+      app.exit(1);
+    }
+    return;
+  }
+
+  if (IS_VERIFY_CAMERA) {
+    const { verifyCameraTracking } = require('./verify-camera');
+    registerIpc();
+    try {
+      const code = await verifyCameraTracking({
+        trigger,
+        overlay,
+        wait,
+        isPlaying: () => playing,
+        prefs,
+        getLastReport: () => lastRunReport,
+      });
+      process.exitCode = code;
+      app.exit(code);
+    } catch (error) {
+      console.error('[win-duo] camera verification failed:', error);
       app.exit(1);
     }
     return;

@@ -23,6 +23,7 @@
     settings: {
       title: 'Win Duo',
       subtitle: 'The iPhone Duo fold effect, on any Windows laptop.',
+      tracking: 'Lid tracking',
       trigger: 'Trigger',
       angle: 'Angle',
       optics: 'Optics',
@@ -36,6 +37,25 @@
       launchAtLogin: { label: 'Start at login' },
       displayMode: { label: 'Display', primary: 'Primary', cursor: 'Under the cursor' },
       hotkey: { label: 'Global hotkey' },
+      angleSource: {
+        label: 'Angle source',
+        camera: 'Follow the lid (webcam)',
+        sweep: 'Scripted animation',
+        hint: 'Following the lid reads the angle from the built-in webcam. The camera light comes on only while armed, and no frames are stored.',
+      },
+      showAngleReadout: { label: 'Show the tracked angle on screen' },
+      restAngle: {
+        label: 'Rest angle',
+        hint: 'The lid angle you work at, and the angle the fold starts from. Set it to whatever your screen stands at when you are sitting normally.',
+      },
+      trackerGain: {
+        label: 'Follow strength',
+        hint: 'How much fold you get per unit of lid movement. Raise it if the fold does not go far enough before the screen fades out.',
+      },
+      fullTravel: {
+        label: 'Full-close travel',
+        hint: 'Learned automatically from each complete close, so leave it alone unless the fold consistently stops short or overshoots.',
+      },
       thresholdAngle: {
         label: 'Trigger angle',
         hint: 'The fold starts once the angle drops below this. 90° is a lid standing straight up.',
@@ -88,6 +108,7 @@
     settings: {
       title: 'Win Duo',
       subtitle: '把 iPhone Duo 的开合透视效果带到任意一台 Windows 笔记本上。',
+      tracking: '合盖跟随',
       trigger: '触发',
       angle: '角度',
       optics: '光学',
@@ -101,6 +122,25 @@
       launchAtLogin: { label: '开机时启动' },
       displayMode: { label: '作用屏幕', primary: '主屏幕', cursor: '鼠标所在屏幕' },
       hotkey: { label: '全局快捷键' },
+      angleSource: {
+        label: '角度来源',
+        camera: '跟随真实盖子（摄像头）',
+        sweep: '脚本动画',
+        hint: '跟随真实盖子的角度来自内置摄像头。指示灯只在待命期间亮起，画面一帧都不保存。',
+      },
+      showAngleReadout: { label: '在屏幕上显示实时角度' },
+      restAngle: {
+        label: '静止角',
+        hint: '你平时使用时的盖子角度，也是折叠的起点。设成你正常坐姿下屏幕实际张开的角度。',
+      },
+      trackerGain: {
+        label: '跟手强度',
+        hint: '盖子动同样多时画面折多少。如果屏幕还没暗下去效果就已经折满了，就调小。',
+      },
+      fullTravel: {
+        label: '满行程',
+        hint: '每次完整合盖后自动学习，一般不用管。只有在效果总是折不到位或提前折满时才手动改。',
+      },
       thresholdAngle: {
         label: '触发角度',
         hint: '角度低于这个值时开始出现效果。90° 相当于盖子竖直。',

@@ -9,6 +9,7 @@
   'use strict';
 
   const bridge = window.recon;
+  const NS = window.WinDuo;
   const $ = (id) => document.getElementById(id);
   /**
    * Synthetic mode feeds the tracker a generated scene moved by a known number
@@ -60,12 +61,11 @@
   // --- collectors ----------------------------------------------------------
 
   /**
-   * Accumulated vertical shift of the scene, in canvas rows.
+   * The camera signal, wrapped for the collector loop.
    *
-   * The frame is cut into vertical strips and each strip is correlated on its
-   * own, then the median of the strips is taken. A moving hand or a nodding head
-   * only corrupts the few strips it covers, and a median throws those away,
-   * where a whole-frame average would drag the answer with them.
+   * The tracking itself lives in src/renderer/lib/lid-tracker.js, because the
+   * overlay uses the same code. Two copies of a tracker would be two places for
+   * a drift bug to hide.
    */
   class CameraCollector {
     constructor() {
@@ -76,253 +76,34 @@
       // null means "not tried yet": the camera only opens when a run starts.
       this.available = null;
       this.note = '按下“开始记录”后启动';
-      this.width = 160;
-      this.height = 120;
-      this.strips = 8;
-      this.search = 6;
-      this.stripWidth = this.width / this.strips;
-      this.total = 0;
-      this.quality = 0;
-      this.usedStrips = 0;
-      this.previous = null;
+      this.tracker = new NS.LidTracker({ synthetic: SYNTHETIC });
     }
 
     async start() {
-      if (SYNTHETIC) {
-        this.source = document.createElement('canvas');
-        this.source.width = 640;
-        this.source.height = 960;
-        drawSyntheticScene(this.source.getContext('2d'), this.source.width, this.source.height);
-        this.offset = 0;
-        this.canvas = document.createElement('canvas');
-        this.canvas.width = this.width;
-        this.canvas.height = this.height;
-        this.ctx = this.canvas.getContext('2d', { willReadFrequently: true });
-        this.available = true;
-        this.note = 'synthetic';
-        return true;
-      }
-      try {
-        this.stream = await navigator.mediaDevices.getUserMedia({
-          video: { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 30 } },
-        });
-      } catch (error) {
-        this.note = `摄像头打不开: ${error.message}`;
-        this.available = false;
-        return false;
-      }
-      this.video = document.createElement('video');
-      this.video.srcObject = this.stream;
-      this.video.muted = true;
-      this.video.playsInline = true;
-      await this.video.play();
-      this.canvas = document.createElement('canvas');
-      this.canvas.width = this.width;
-      this.canvas.height = this.height;
-      this.ctx = this.canvas.getContext('2d', { willReadFrequently: true });
-      this.available = true;
-      this.note = '';
-      return true;
+      const opened = await this.tracker.open();
+      this.available = opened;
+      this.note = opened ? '' : (this.tracker.note || '摄像头打不开');
+      return opened;
     }
 
     /** Called when a cycle starts: the shift is measured from here. */
     reset() {
-      this.total = 0;
-      this.previous = null;
+      this.tracker.reset();
+    }
+
+    sample() {
+      return this.tracker.sample();
     }
 
     /** Short status for the badge. */
     describe() {
-      return this.available ? `on q${this.quality.toFixed(2)} · ${this.usedStrips}/${this.strips}` : '';
-    }
-
-    sample() {
-      if (!this.available) return null;
-      if (SYNTHETIC) {
-        // Slide a 640x480 window down a taller scene. One row of the small
-        // canvas is four pixels of the source, which is the same 4x reduction
-        // the real path does from 640x480 to 160x120.
-        const sourceHeight = this.source.width * (this.height / this.width);
-        this.ctx.drawImage(
-          this.source,
-          0, this.offset, this.source.width, sourceHeight,
-          0, 0, this.width, this.height,
-        );
-      } else {
-        this.ctx.drawImage(this.video, 0, 0, this.width, this.height);
-      }
-      const { data } = this.ctx.getImageData(0, 0, this.width, this.height);
-
-      const strips = [];
-      for (let s = 0; s < this.strips; s += 1) {
-        const from = Math.round(s * this.stripWidth);
-        const to = Math.round((s + 1) * this.stripWidth);
-        const profile = new Float32Array(this.height);
-        let sum = 0;
-        let sumSquares = 0;
-        for (let y = 0; y < this.height; y += 1) {
-          let acc = 0;
-          for (let x = from; x < to; x += 1) {
-            const i = (y * this.width + x) * 4;
-            acc += (data[i] + data[i + 1] + data[i + 2]) / 3;
-          }
-          const value = acc / (to - from);
-          profile[y] = value;
-          sum += value;
-          sumSquares += value * value;
-        }
-        const variance = sumSquares / this.height - (sum / this.height) ** 2;
-        strips.push({ profile, variance });
-      }
-
-      if (this.previous) {
-        const shifts = [];
-        let confidenceSum = 0;
-        for (let s = 0; s < this.strips; s += 1) {
-          // A flat strip (blank wall, dark ceiling) has nothing to correlate.
-          if (strips[s].variance < 4) continue;
-          const { shift, confidence } = bestShift(this.previous[s].profile, strips[s].profile, this.search);
-          if (!Number.isFinite(shift) || confidence < 0.7) continue;
-          shifts.push(shift);
-          confidenceSum += confidence;
-        }
-        this.usedStrips = shifts.length;
-        if (shifts.length >= 3) {
-          const middle = medianOf(shifts);
-          this.quality = confidenceSum / shifts.length;
-          // Deadband. Real motion is around 0.7 rows per frame when closing at a
-          // deliberate pace, so anything under this is correlation noise, and
-          // letting it accumulate would drift the angle while the lid is held.
-          if (Math.abs(middle) > 0.08) this.total += middle;
-        }
-      }
-
-      this.previous = strips;
-      return this.total;
+      return this.available ? `on ${this.tracker.describe()}` : '';
     }
 
     stop() {
-      if (this.stream) this.stream.getTracks().forEach((t) => t.stop());
+      this.tracker.close();
       this.available = null;
     }
-  }
-
-  function medianOf(values) {
-    const sorted = [...values].sort((a, b) => a - b);
-    const mid = sorted.length >> 1;
-    return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
-  }
-
-  /**
-   * A deterministic scene with strong vertical texture: banded gradients, a
-   * grid, and a fixed pseudo-random block pattern. Deterministic matters,
-   * because the self test compares the tracked shift against the injected one.
-   */
-  function drawSyntheticScene(ctx, width, height) {
-    ctx.fillStyle = '#202226';
-    ctx.fillRect(0, 0, width, height);
-
-    const gradient = ctx.createLinearGradient(0, 0, 0, height);
-    gradient.addColorStop(0, '#1a2740');
-    gradient.addColorStop(0.5, '#3a2a30');
-    gradient.addColorStop(1, '#16281f');
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, width, height);
-
-    // A fixed LCG keeps the pattern identical between runs.
-    let seed = 12345;
-    const random = () => {
-      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
-      return seed / 0x7fffffff;
-    };
-
-    for (let i = 0; i < 220; i += 1) {
-      const x = random() * width;
-      const y = random() * height;
-      const w = 20 + random() * 90;
-      const h = 6 + random() * 26;
-      const level = Math.floor(60 + random() * 190);
-      ctx.fillStyle = `rgb(${level},${level},${level})`;
-      ctx.fillRect(x, y, w, h);
-    }
-
-    ctx.strokeStyle = 'rgba(255,255,255,0.22)';
-    ctx.lineWidth = 1;
-    for (let y = 0; y < height; y += 24) {
-      ctx.beginPath();
-      ctx.moveTo(0, y + 0.5);
-      ctx.lineTo(width, y + 0.5);
-      ctx.stroke();
-    }
-    for (let x = 0; x < width; x += 40) {
-      ctx.beginPath();
-      ctx.moveTo(x + 0.5, 0);
-      ctx.lineTo(x + 0.5, height);
-      ctx.stroke();
-    }
-  }
-
-  /**
-   * Cross-correlates two row-brightness profiles and returns the vertical shift
-   * of the second relative to the first, with a parabolic sub-pixel refinement.
-   *
-   * Sign convention: positive means the scene moved DOWN the frame. Content at
-   * row y+d in the first frame is at row y in the second, so `a[y]` matches
-   * `b[y+s]` at `s = d`.
-   */
-  function bestShift(a, b, maxShift) {
-    const scores = new Float32Array(maxShift * 2 + 1);
-    let bestIndex = maxShift;
-    let bestScore = -Infinity;
-
-    for (let s = -maxShift; s <= maxShift; s += 1) {
-      let n = 0;
-      let ma = 0;
-      let mb = 0;
-      for (let y = 0; y < a.length; y += 1) {
-        const yy = y + s;
-        if (yy < 0 || yy >= b.length) continue;
-        ma += a[y];
-        mb += b[yy];
-        n += 1;
-      }
-      if (n < a.length * 0.6) {
-        scores[s + maxShift] = -Infinity;
-        continue;
-      }
-      ma /= n;
-      mb /= n;
-      let num = 0;
-      let da = 0;
-      let db = 0;
-      for (let y = 0; y < a.length; y += 1) {
-        const yy = y + s;
-        if (yy < 0 || yy >= b.length) continue;
-        const va = a[y] - ma;
-        const vb = b[yy] - mb;
-        num += va * vb;
-        da += va * va;
-        db += vb * vb;
-      }
-      const score = da > 0 && db > 0 ? num / Math.sqrt(da * db) : -Infinity;
-      scores[s + maxShift] = score;
-      if (score > bestScore) {
-        bestScore = score;
-        bestIndex = s + maxShift;
-      }
-    }
-
-    let shift = bestIndex - maxShift;
-    if (bestIndex > 0 && bestIndex < scores.length - 1) {
-      const y0 = scores[bestIndex - 1];
-      const y1 = scores[bestIndex];
-      const y2 = scores[bestIndex + 1];
-      const denom = y0 - 2 * y1 + y2;
-      if (Number.isFinite(y0) && Number.isFinite(y2) && Math.abs(denom) > 1e-9) {
-        shift += 0.5 * (y0 - y2) / denom;
-      }
-    }
-    return { shift, confidence: bestScore };
   }
 
   /** Level of a probe tone at the microphone, in dB. */
@@ -875,23 +656,24 @@
        */
       async run(steps, pixelsPerStep) {
         const camera = collectors.find((c) => c.name === 'camera');
+        const tracker = camera.tracker;
         for (let i = 0; i < steps; i += 1) {
-          camera.offset += pixelsPerStep;
+          tracker.offset += pixelsPerStep;
           camera.sample();
         }
-        const sourceHeight = camera.source.width * (camera.height / camera.width);
+        const sourceHeight = tracker.source.width * (tracker.height / tracker.width);
         return {
           steps,
           pixelsPerStep,
-          total: Number(camera.total.toFixed(3)),
+          total: Number(tracker.total.toFixed(3)),
           // Sliding the source window down the scene makes the scene move up the
-          // frame, and `bestShift` counts a downward move as positive, so the
+          // frame, and the tracker counts a downward move as positive, so the
           // expectation is negative. Checking the sign here is deliberate: a
           // tracker that follows the lid backwards would still look plausible
           // until it was wired into the effect.
-          expected: Number((-steps * pixelsPerStep * (camera.height / sourceHeight)).toFixed(3)),
-          quality: Number(camera.quality.toFixed(3)),
-          usedStrips: camera.usedStrips,
+          expected: Number((-steps * pixelsPerStep * (tracker.height / sourceHeight)).toFixed(3)),
+          quality: Number(tracker.quality.toFixed(3)),
+          usedStrips: tracker.usedStrips,
         };
       },
     };
