@@ -1,0 +1,49 @@
+{
+  "name": "win-duo",
+  "productName": "Win Duo",
+  "version": "0.1.0",
+  "description": "Bring the iPhone Duo fold-open perspective effect to any Windows laptop. No hinge sensor required.",
+  "main": "src/main/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "electron .",
+    "selftest": "electron . --selftest",
+    "selftest:real": "electron . --selftest --real",
+    "verify": "electron . --verify",
+    "timing": "electron . --timing",
+    "check:settings": "electron . --check-settings",
+    "bench": "electron tools/bench-capture.js",
+    "diagnose": "electron tools/diagnose-overlay.js",
+    "docs:image": "electron tools/make-docs-image.js",
+    "dist": "electron-builder --win"
+  },
+  "keywords": [
+    "iphone-duo",
+    "fold",
+    "perspective",
+    "homography",
+    "webgl",
+    "electron",
+    "windows",
+    "lid"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^44.0.0"
+  },
+  "build": {
+    "appId": "dev.winduo.app",
+    "productName": "Win Duo",
+    "files": [
+      "src/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    }
+  }
+}

@@ -1,0 +1,19 @@
+node_modules/
+dist/
+out/
+
+# Self test dumps. Regenerate with `npm run selftest`.
+selftest-output/
+
+# Electron build leftovers
+*.log
+npm-debug.log*
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# Windows
+Thumbs.db
+desktop.ini

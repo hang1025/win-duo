@@ -1,0 +1,154 @@
+/**
+ * UI strings, English and Chinese.
+ *
+ * Loaded both as a CommonJS module by the main process and as a classic script
+ * by the settings page, so it deliberately has no imports.
+ */
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory();
+  else root.WinDuoStrings = factory();
+}(typeof self !== 'undefined' ? self : this, function () {
+  'use strict';
+
+  const en = {
+    tray: {
+      play: 'Play the fold',
+      settings: 'Settings…',
+      launchAtLogin: 'Start at login',
+      enabled: 'Enabled',
+      openSettingsFolder: 'Open settings folder',
+      quit: 'Quit',
+      tooltip: 'Win Duo',
+    },
+    settings: {
+      title: 'Win Duo',
+      subtitle: 'The iPhone Duo fold effect, on any Windows laptop.',
+      trigger: 'Trigger',
+      angle: 'Angle',
+      optics: 'Optics',
+      motion: 'Motion',
+      preview: 'Preview',
+      reset: 'Reset to defaults',
+      footer: 'Changes apply immediately and are written to settings.json',
+    },
+    params: {
+      enabled: { label: 'Enabled' },
+      launchAtLogin: { label: 'Start at login' },
+      displayMode: { label: 'Display', primary: 'Primary', cursor: 'Under the cursor' },
+      hotkey: { label: 'Global hotkey' },
+      thresholdAngle: {
+        label: 'Trigger angle',
+        hint: 'The fold starts once the angle drops below this. 90° is a lid standing straight up.',
+      },
+      blurSpan: {
+        label: 'Blur span',
+        hint: 'How many more degrees of travel it takes to reach full blur.',
+      },
+      viewingDistance: {
+        label: 'Eye distance',
+        hint: 'In screen heights. Lower is a stronger perspective. Sitting at a desk is about 3; across the room, about 6.',
+      },
+      recession: {
+        label: 'Picture rotation',
+        hint: 'Degrees the picture turns away for each degree of lid travel. 1 pins the picture to the room.',
+      },
+      maxBlurRadius: {
+        label: 'Maximum blur radius',
+        hint: 'Radius at full strength, applied towards the far edge.',
+      },
+      blurEvenness: {
+        label: 'Blur evenness',
+        hint: '0 keeps the hinge edge sharp, 1 blurs the whole picture by the same amount.',
+      },
+      maxDim: { label: 'Maximum dimming', hint: 'How black the far edge goes.' },
+      dimReach: {
+        label: 'Dimming reach',
+        hint: 'Height, as a fraction of the screen, at which the dimming reaches full strength.',
+      },
+      dimHingeFloor: {
+        label: 'Hinge dimming',
+        hint: 'Dimming kept at the hinge edge, as a fraction of the far edge.',
+      },
+      sweepClosing: { label: 'Close duration', hint: 'Seconds for the scripted sweep to close.' },
+      sweepHold: { label: 'Hold duration', hint: 'Seconds the picture stays folded.' },
+      sweepOpening: { label: 'Open duration', hint: 'Seconds to unfold back to flat.' },
+    },
+  };
+
+  const zh = {
+    tray: {
+      play: '播放开合效果',
+      settings: '设置…',
+      launchAtLogin: '开机时启动',
+      enabled: '启用效果',
+      openSettingsFolder: '打开设置文件所在目录',
+      quit: '退出',
+      tooltip: 'Win Duo',
+    },
+    settings: {
+      title: 'Win Duo',
+      subtitle: '把 iPhone Duo 的开合透视效果带到任意一台 Windows 笔记本上。',
+      trigger: '触发',
+      angle: '角度',
+      optics: '光学',
+      motion: '动画',
+      preview: '预览效果',
+      reset: '恢复默认',
+      footer: '设置即时生效，并写入 settings.json',
+    },
+    params: {
+      enabled: { label: '启用效果' },
+      launchAtLogin: { label: '开机时启动' },
+      displayMode: { label: '作用屏幕', primary: '主屏幕', cursor: '鼠标所在屏幕' },
+      hotkey: { label: '全局快捷键' },
+      thresholdAngle: {
+        label: '触发角度',
+        hint: '角度低于这个值时开始出现效果。90° 相当于盖子竖直。',
+      },
+      blurSpan: {
+        label: '模糊跨度',
+        hint: '越过触发角度后再合多少度，模糊达到最强。',
+      },
+      viewingDistance: {
+        label: '眼睛距离',
+        hint: '单位是屏高。越小透视越强。坐着看约 3，站远了约 6。',
+      },
+      recession: {
+        label: '画面转开比例',
+        hint: '盖子每转一度，画面转开多少度。1 表示画面钉在房间里。',
+      },
+      maxBlurRadius: {
+        label: '最大模糊半径',
+        hint: '最强模糊时的半径，作用在远离铰链的一侧。',
+      },
+      blurEvenness: {
+        label: '模糊均匀度',
+        hint: '0 让铰链一侧保持清晰，1 表示整幅画面一样糊。',
+      },
+      maxDim: { label: '最大压暗', hint: '远端一侧最终的黑度。' },
+      dimReach: {
+        label: '压暗到达高度',
+        hint: '从铰链往上到屏高的多少比例时，压暗达到满值。',
+      },
+      dimHingeFloor: {
+        label: '铰链侧压暗',
+        hint: '铰链一侧保留的压暗，相对远端满值的比例。',
+      },
+      sweepClosing: { label: '合上时长', hint: '脚本扫掠合上所用的秒数。' },
+      sweepHold: { label: '停留时长', hint: '画面保持折起的秒数。' },
+      sweepOpening: { label: '打开时长', hint: '展平回去所用的秒数。' },
+    },
+  };
+
+  /** Resolves a dotted path like 'params.maxDim.label'. */
+  function pick(table, path) {
+    return path.split('.').reduce((node, part) => (node == null ? undefined : node[part]), table);
+  }
+
+  /** Picks a language from a locale tag such as 'zh-CN'. */
+  function forLocale(locale) {
+    return String(locale || '').toLowerCase().startsWith('zh') ? 'zh' : 'en';
+  }
+
+  return { en, zh, pick, forLocale };
+}));

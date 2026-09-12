@@ -1,0 +1,42 @@
+Win Duo
+Copyright 2026 Win Duo contributors
+
+This product is a Windows port of Mac Duo, and is derived from it.
+
+Mac Duo
+Copyright 2026 Makito
+Originally developed by Makito.
+https://github.com/sumimakito/Mac-Duo
+
+Mac Duo is licensed under the Apache License, Version 2.0, and so is this port.
+A copy of that license is in LICENSE.
+
+Changes made in this port, as required by section 4(b) of the license:
+
+  - The lid angle sensor reader was removed. Mac Duo reads an Apple
+    `AppleSPUHIDDevice` (HID usage page 0x20, usage 0x8A) that reports the hinge
+    angle directly. No equivalent exists on a normal Windows laptop, so the angle
+    is instead produced by a scripted sweep in
+    `src/main/defaults.js` and smoothed by the same critically damped spring.
+  - Screen capture was reimplemented on Electron's `desktopCapturer` in place of
+    ScreenCaptureKit.
+  - Metal and MetalPerformanceShaders were replaced by WebGL2, and the Gaussian
+    pyramid by mip levels sampled through `textureLod`.
+  - The Metal fragment shader's dimming, which raises its factor to 2.2 because
+    the original samples an sRGB texture and works in linear light, becomes a
+    direct multiply because this port never decodes the texture.
+  - The AppKit overlay window, menu bar item and SwiftUI settings panel were
+    replaced by an Electron BrowserWindow, a tray menu, and an HTML settings
+    page.
+  - The lid angle sensor and its whole trigger policy (velocity prediction,
+    pre-warm capture, hysteresis, idle timeout) were removed along with it, and
+    replaced by a global hotkey and a tray menu item.
+
+Files that carry ported logic, with their Mac Duo counterparts:
+
+  src/renderer/lib/geometry.js   <-> Sources/MacDuo/DepthOverlay.swift
+  src/renderer/lib/homography.js <-> Sources/MacDuo/Homography.swift
+  src/renderer/lib/shader.js     <-> Sources/MacDuo/DepthShaders.swift
+  src/renderer/lib/spring.js     <-> Sources/MacDuo/CriticallyDampedSpring.swift
+  src/renderer/lib/gradient.js   <-> Sources/MacDuo/BlurGradient.swift
+  src/main/defaults.js           <-> Sources/MacDuo/Preferences.swift
