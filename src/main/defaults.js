@@ -60,6 +60,14 @@ const DEFAULTS = {
   maxArmedMs: 300000,
   // Radians per second of the spring that smooths the tracked progress.
   trackerSpringFrequency: 16,
+  // The same spring, speeded up for the ease back to flat when a run ends. At
+  // the tracking frequency the ease alone takes about half a second, because a
+  // critically damped spring needs four or five time constants to settle - and
+  // that is exactly what a click-to-exit feels like: half a second of nothing.
+  releaseSpringFrequency: 45,
+  // And a shorter fade after an explicit click, which is the case where waiting
+  // is least welcome.
+  clickFadeOut: 0.12,
   // Draw the tracked angle in the corner, for checking the tracking by eye.
   showAngleReadout: true,
 

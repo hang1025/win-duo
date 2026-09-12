@@ -260,6 +260,7 @@
         engaged: state.engaged,
         releasing: state.releasing,
         peakTravel: Number(state.peakTravel.toFixed(2)),
+        gate: state.gate,
       }
       : null,
   });
@@ -437,7 +438,16 @@
 
     let target = NS.gradient.clamp01(pastNeutral / span);
     if (state.releasing) target = 0;
-    trackerSpring.advance(target, dt, settings.trackerSpringFrequency);
+    // The ease back to flat runs at its own, faster frequency: at the tracking
+    // frequency it alone takes about half a second, which is what made clicking
+    // to exit feel unresponsive.
+    trackerSpring.advance(
+      target,
+      dt,
+      state.releasing
+        ? (Number(settings.releaseSpringFrequency) || 45)
+        : settings.trackerSpringFrequency,
+    );
     const progress = NS.gradient.clamp01(trackerSpring.value);
 
     state.progress = progress;
@@ -460,7 +470,18 @@
 
     // Release only after a real close, and only once the lid is back at rest.
     const closedProperly = state.maxPeak > full * 0.25;
-    if (closedProperly && state.peakTravel < full * settings.releaseFraction) {
+    const releaseAt = full * settings.releaseFraction;
+    // Kept for the debug readout: the whole decision in one object, because a
+    // run that will not end is otherwise invisible.
+    state.gate = {
+      on: settings.releaseOn,
+      closedProperly,
+      maxPeak: Number(state.maxPeak.toFixed(1)),
+      peakTravel: Number(state.peakTravel.toFixed(1)),
+      releaseAt: Number.isFinite(releaseAt) ? Number(releaseAt.toFixed(1)) : String(releaseAt),
+    };
+
+    if (closedProperly && state.peakTravel < releaseAt) {
       beginRelease('back at rest');
     } else if (!closedProperly && now - state.lastMoveAt > settings.idleReleaseMs) {
       beginRelease('no lid movement');
@@ -531,7 +552,12 @@
     // fade-in then lands on an untouched desktop and has nothing to give away.
     const waiting = state.mode === 'camera' && !state.engaged && !state.releasing;
     const targetOpacity = state.fadingOut || waiting ? 0 : 1;
-    const duration = state.fadingOut ? state.settings.fadeOut : state.settings.fadeIn;
+    // A click is the case where waiting is least welcome, so it gets the short
+    // fade.
+    const fadeOut = state.releaseReason === 'clicked'
+      ? (Number(state.settings.clickFadeOut) || 0.12)
+      : state.settings.fadeOut;
+    const duration = state.fadingOut ? fadeOut : state.settings.fadeIn;
     const step = duration > 0 ? dt / duration : 1;
     state.opacity = targetOpacity > state.opacity
       ? Math.min(targetOpacity, state.opacity + step)
@@ -547,6 +573,7 @@
     if (state.fadingOut && state.opacity <= 0.0005) {
       const report = {
         mode: state.mode,
+        synthetic: Boolean(state.syntheticCamera),
         engaged: state.engaged,
         peakTravel: state.peakTravel,
         maxPeak: state.maxPeak,
@@ -640,6 +667,11 @@
       // Live tracking state.
       travel: 0,
       lastInverse: null,
+      // True when the tracker is running against a generated scene rather than
+      // the camera. Reported back so the main process can leave the calibration
+      // alone: a synthetic run would otherwise teach the user's settings a
+      // travel distance that came out of a test pattern.
+      syntheticCamera: Boolean(payload.syntheticCamera),
       // +1 or -1: which sign of tracked travel means the lid is closing. Latched
       // from the first real movement, because it depends on the hardware.
       direction: 1,
@@ -648,7 +680,6 @@
       // follows. Ratcheted so noise and mid-close reversals cannot wind it back.
       peakTravel: 0,
       maxPeak: 0,
-      retraceAt: 0,
       lastIdleTravel: 0,
       lastMoveAt: performance.now(),
       interactive: false,
@@ -658,7 +689,6 @@
       usedStrips: 0,
       engaged: false,
       engagedAt: 0,
-      peakTravel: 0,
       releasing: false,
       releaseReason: '',
       armedAt: performance.now(),
@@ -796,9 +826,14 @@
   // While armed and waiting the overlay is click-through and never sees this;
   // once the picture is up it takes input, which is the trade that makes the
   // click possible at all.
-  document.addEventListener('mousedown', () => {
+  //
+  // Both events are bound: `pointerdown` covers pointers that are not a mouse,
+  // and `mousedown` is the one that fires first on Windows.
+  const endOnClick = () => {
     if (!state || state.releasing || !state.engaged) return;
     beginRelease('clicked');
-  });
+  };
+  document.addEventListener('mousedown', endOnClick);
+  document.addEventListener('pointerdown', endOnClick);
   document.addEventListener('contextmenu', (event) => event.preventDefault());
 })();

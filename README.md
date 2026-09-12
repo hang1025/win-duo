@@ -113,6 +113,12 @@ picture is up the overlay takes mouse input instead of passing it through, so th
 means stop. Set `releaseOn` to `click` and a run never times out at all: it stays folded and
 the camera stays on until you click.
 
+Clicking clears the screen in about **280 ms**. The ease back to flat and the fade are
+serial, so the ease runs at its own, faster spring frequency: at the tracking frequency it
+alone takes about half a second, because a critically damped spring needs four or five time
+constants to settle, and that half second of nothing is exactly what made clicking feel
+unresponsive.
+
 There is no angle at which the effect switches itself off. It ends when the lid comes back to
 rest, when nothing has moved for fifteen seconds after arming, or after five minutes as a cap
 on how long the camera may stay on.
@@ -442,6 +448,8 @@ npm start
 5. **松手。** 盖子回到静止角后，画面缓动归平、淡出，摄像头指示灯熄灭。
 
 **鼠标单击可以随时立刻结束一次运行**，无论上面配的是哪种结束方式——画面出现后覆盖层会接管鼠标输入而不是穿透过去，所以点击就意味着"停"。把 `releaseOn` 设成 `click`，运行就完全不超时：画面一直折着、摄像头一直开着，直到你点击。
+
+点击到画面消失约 **280 毫秒**。"缓动归平"和"淡出"是串联的，所以归平用了更快的弹簧频率：在跟踪频率下它单独就要花约半秒（临界阻尼弹簧需要四五个时间常数才能收敛），那半秒的"没反应"正是点击感觉很慢的原因。
 
 待命后 15 秒内没有任何动作，它会自动解除待命并把屏幕还给你。运行之外，摄像头指示灯永远不会亮。
 

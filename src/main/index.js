@@ -185,6 +185,9 @@ function endRun(report) {
 function calibrateFromRun(report) {
   if (!prefs || !report || report.mode !== 'camera' || !report.engaged) return;
   if (report.reason !== 'back at rest') return;
+  // A run driven by the generated scene measures the test pattern, not this
+  // user's room, so it must not be allowed to adjust their settings.
+  if (report.synthetic) return;
 
   const peak = Number(report.maxPeak);
   if (!Number.isFinite(peak) || peak <= 0) return;

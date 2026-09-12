@@ -20,7 +20,12 @@ async function verifyCameraTracking({ trigger, overlay, wait, isPlaying, prefs, 
   const restAngle = Number(prefs.values.restAngle) || 105;
 
   await wait(400);
-  await trigger({ angleSource: 'camera', syntheticCamera: true });
+  // Forced to 'auto' for this phase: the user is free to set 'click', which by
+  // design never releases, and this phase is checking the release that happens
+  // when the lid comes back on its own. The override is per run and is never
+  // written back to their settings.
+  console.log(`user releaseOn=${prefs.values.releaseOn}, this phase forces 'auto'`);
+  await trigger({ angleSource: 'camera', syntheticCamera: true, releaseOn: 'auto' });
   await wait(1000);
 
   const debug = () => win.webContents.executeJavaScript('window.__winDuoDebug()');
@@ -48,6 +53,8 @@ async function verifyCameraTracking({ trigger, overlay, wait, isPlaying, prefs, 
 
   const openDrive = await drive(34, -8);
   await wait(300);
+  const reopening = await debug();
+  console.log(`reopen  ${JSON.stringify(reopening.state)}`);
 
   const deadline = Date.now() + 10000;
   while (isPlaying() && Date.now() < deadline) await wait(100);
@@ -104,17 +111,22 @@ async function verifyCameraTracking({ trigger, overlay, wait, isPlaying, prefs, 
     await win.webContents.executeJavaScript(
       "document.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })), true",
     );
+    const clickAt = Date.now();
     const deadline2 = Date.now() + 8000;
-    while (isPlaying() && Date.now() < deadline2) await wait(100);
-    return { beforeClick, report: getLastReport(), ms: Date.now() - started };
+    while (isPlaying() && Date.now() < deadline2) await wait(15);
+    return { beforeClick, report: getLastReport(), latency: Date.now() - clickAt };
   };
 
   console.log('--- a click should end a run on its own ---');
   const clicked = await clickRun({ angleSource: 'camera', syntheticCamera: true }, 400);
-  console.log(`  reason=${clicked.report && clicked.report.reason}  hidden=${!win.isVisible()}`);
+  console.log(`  reason=${clicked.report && clicked.report.reason}  hidden=${!win.isVisible()}  click to gone: ${clicked.latency} ms`);
   if (!clicked.report || clicked.report.reason !== 'clicked') {
     problems.push(`a click did not end the run (reason ${clicked.report && clicked.report.reason})`);
   }
+  // The ease back to flat and the fade are serial, so this is the number that
+  // decides whether clicking feels like it did anything. It used to be around
+  // 700 ms.
+  if (clicked.latency > 450) problems.push(`clicking took ${clicked.latency} ms to clear the screen`);
 
   console.log('--- "only when I click" should not time out ---');
   const held = await clickRun(
