@@ -66,14 +66,73 @@ async function verifyCameraTracking({ trigger, overlay, wait, isPlaying, prefs, 
   if (closing.state && closing.state.opacity < 0.9) problems.push('the picture never became visible');
   if (!report || report.reason !== 'back at rest') problems.push(`the release reason was ${report && report.reason}`);
   if (report && !(report.maxPeak > fullTravel * 0.15)) problems.push(`the peak travel was not reported (${report && report.maxPeak})`);
-  if (report && !(report.peakTravel < report.maxPeak * 0.5)) problems.push('the fold did not ratchet back down on reopen');
+  if (report && !(report.peakTravel < report.maxPeak * 0.5)) problems.push('the fold did not follow back down on reopen');
   if (!hidden) problems.push('the overlay stayed up');
+
+  // The picture has to travel back down, not step back down. An earlier ratchet
+  // froze the fold and then released it in ~20% chunks, which read as the blur
+  // snapping. The drive moves 2 rows per frame, so at 100 ms sampling a smooth
+  // reopen changes by far less than this.
+  if (report && report.trace && report.trace.length > 4) {
+    let worstStep = 0;
+    let worstAt = 0;
+    for (let i = 1; i < report.trace.length; i += 1) {
+      const step = Math.abs(report.trace[i].peak - report.trace[i - 1].peak);
+      if (step > worstStep) { worstStep = step; worstAt = report.trace[i].t; }
+    }
+    console.log(`largest travel step between 100 ms samples: ${worstStep.toFixed(1)} rows at ${worstAt} ms`);
+    if (worstStep > 25) problems.push(`the travel steps by ${worstStep.toFixed(1)} rows at once`);
+  }
 
   if (problems.length) {
     console.log(`FAIL: ${problems.join('; ')}`);
     return 1;
   }
   console.log('PASS: arming, tracking, the fold following the lid, the release and the report all worked.');
+
+  // --- clicking ends a run -------------------------------------------------
+  const clickRun = async (overrides, settleMs) => {
+    const started = Date.now();
+    await trigger(overrides);
+    await wait(1000);
+    await drive(20, 8);
+    await wait(settleMs);
+    const beforeClick = await debug();
+    if (settleMs > 0) {
+      console.log(`  after ${settleMs} ms of holding still: engaged=${beforeClick.state && beforeClick.state.engaged} releasing=${beforeClick.state && beforeClick.state.releasing} progress=${beforeClick.state && beforeClick.state.progress}`);
+    }
+    await win.webContents.executeJavaScript(
+      "document.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })), true",
+    );
+    const deadline2 = Date.now() + 8000;
+    while (isPlaying() && Date.now() < deadline2) await wait(100);
+    return { beforeClick, report: getLastReport(), ms: Date.now() - started };
+  };
+
+  console.log('--- a click should end a run on its own ---');
+  const clicked = await clickRun({ angleSource: 'camera', syntheticCamera: true }, 400);
+  console.log(`  reason=${clicked.report && clicked.report.reason}  hidden=${!win.isVisible()}`);
+  if (!clicked.report || clicked.report.reason !== 'clicked') {
+    problems.push(`a click did not end the run (reason ${clicked.report && clicked.report.reason})`);
+  }
+
+  console.log('--- "only when I click" should not time out ---');
+  const held = await clickRun(
+    { angleSource: 'camera', syntheticCamera: true, releaseOn: 'click', idleReleaseMs: 1500 },
+    3200,
+  );
+  const stillUp = held.beforeClick.state && held.beforeClick.state.engaged && !held.beforeClick.state.releasing;
+  console.log(`  still up after 3.2 s against a 1.5 s idle timeout: ${stillUp}`);
+  if (!stillUp) problems.push('the run timed out even though it was set to end only on a click');
+  if (!held.report || held.report.reason !== 'clicked') {
+    problems.push(`the click after holding did not end the run (reason ${held.report && held.report.reason})`);
+  }
+
+  if (problems.length) {
+    console.log(`FAIL: ${problems.join('; ')}`);
+    return 1;
+  }
+  console.log('PASS: and a click ends a run, in both release modes.');
   return 0;
 }
 

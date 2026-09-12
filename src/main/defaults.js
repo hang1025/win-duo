@@ -33,18 +33,27 @@ const DEFAULTS = {
   foldAngle: 50,
   // Multiplier on the tracked travel, for taste.
   trackerGain: 1,
-  // Fraction of fullTravel that counts as "the lid is moving" and, once folded,
+  // Fraction of fullTravel that counts as "the lid is moving", and, once folded,
   // as "back at rest".
   engageFraction: 0.03,
-  // How far the travel has to reverse before it counts as a reversal at all,
-  // and how long the reversal has to hold before the fold follows it back. The
-  // camera stops looking at the room and starts looking at the keyboard part way
-  // through a close, and that changes the apparent direction for a moment;
-  // without this the fold would jump backwards mid-close.
-  retraceFraction: 0.03,
-  retraceHoldMs: 350,
-  // Below this much travel, after a real close, the lid is back at rest.
-  retraceReleaseFraction: 0.1,
+  // Below this much travel, after a real close, the lid counts as back at rest.
+  releaseFraction: 0.1,
+  // How the fold follows the lid back down. Closing follows instantly; opening
+  // follows through a first-order lag with this time constant, so tracker noise
+  // and the brief reversal part way through a close cannot move the picture,
+  // while a real unfold glides instead of stepping.
+  //
+  // A hold-then-release ratchet was tried here and was worse: it froze the
+  // picture and then jumped about a fifth of the travel at a time, which read as
+  // the blur snapping rather than travelling.
+  releaseFollowSeconds: 0.25,
+  // Degrees either side of `restAngle` where the picture stays perfectly flat,
+  // so the lid can sit at a working angle without any blur at all.
+  neutralBand: 0,
+  // 'auto' ends the run when the lid comes back to rest or after the idle
+  // timeout. 'click' keeps it up until the mouse is clicked, and turns the idle
+  // and stuck caps off entirely - the camera stays on until then.
+  releaseOn: 'auto',
   // Armed with no lid movement for this long, or armed at all for this long,
   // and the camera goes back off.
   idleReleaseMs: 15000,
@@ -68,8 +77,12 @@ const DEFAULTS = {
   // so the effect has to finish its work before then.
   blurSpan: 40,
   // Degrees the picture turns away from the glass for each degree of lid
-  // travel. 1 pins the picture to the room instead of to the glass.
-  recession: 1,
+  // travel. 1 pins the picture to the room instead of to the glass; 0 keeps it
+  // glued flat.
+  //
+  // 0.4 is where this was tuned to by eye on a real laptop: at 1 the picture
+  // swings away far too fast and the fold reads as a swoop rather than a bend.
+  recession: 0.4,
   // Past this the picture would turn its face away from the glass.
   maxSeparationDegrees: 88,
 
@@ -90,12 +103,15 @@ const DEFAULTS = {
   // Black overlay opacity where the blur is at full strength, 0...1.
   maxDim: 0.85,
   // Height at which the dimming reaches full strength, as a fraction of the
-  // screen height, measured from the hinge edge.
-  dimReach: 0.5,
+  // screen height, measured from the hinge edge. Below 1 the dimming saturates
+  // part way up and the top of the picture goes uniformly dark, which reads as a
+  // black band rather than a gradient.
+  dimReach: 0.9,
   // Dimming at the hinge edge, as a fraction of the dimming at the far edge.
   dimHingeFloor: 0.2,
-  // Exponent on the closing travel. Above 1 starts slowly.
-  blurCurve: 1.6,
+  // Exponent on the closing travel. Above 1 starts slowly, which makes the blur
+  // arrive late and then rush; 1 spreads it evenly across the fold.
+  blurCurve: 1,
   dimCurve: 0.7,
   // Black margin around the picture, in points. Must stay above the largest
   // blur radius so the blur reaches real black on every side.

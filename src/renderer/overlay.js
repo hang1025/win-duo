@@ -223,13 +223,14 @@
     }
     readoutElement.style.opacity = '1';
     if (state.mode === 'camera') {
+      const gate = state.engaged ? (state.settings.releaseOn === 'click' ? '点击退出' : '点击或松手退出') : '待命';
       readoutElement.textContent = [
         `角度 ${state.angle.toFixed(1)}°`,
         `行程 ${state.peakTravel.toFixed(0)}/${Number(state.settings.fullTravel).toFixed(0)}`,
         `${(state.progress * 100).toFixed(0)}%`,
         `${Math.round(state.rate || 0)}fps`,
         `q${state.quality.toFixed(2)} ${state.usedStrips}/8`,
-        state.releasing ? '收尾中' : (state.engaged ? '跟随中' : '待命'),
+        state.releasing ? '收尾中' : gate,
       ].join('  ·  ');
     } else {
       readoutElement.textContent = `脚本动画  ${state.angle.toFixed(1)}°`;
@@ -381,7 +382,6 @@
 
     const full = Math.max(1, Number(settings.fullTravel) || 170);
     const engageRows = full * settings.engageFraction;
-    const retraceDeadband = full * settings.retraceFraction;
 
     // Which way the scene slides when the lid closes depends on how the camera
     // is mounted and how the user sits, so the sign is latched from the largest
@@ -393,20 +393,20 @@
     }
     const closingTravel = state.travel * state.direction;
 
-    // A ratchet. The picture follows the furthest the lid has been closed and
-    // only follows it back down once a reversal has held for a moment. Two
-    // things make this necessary: tracker noise wobbling backwards, and the real
-    // reversal part way through a close, when the camera stops looking at the
-    // room and starts looking at the keyboard. Without it the fold jumps back
-    // mid-close, and a hard enough jump used to end the whole run.
-    if (closingTravel > state.peakTravel) {
+    // Closing follows instantly. Opening follows through a first-order lag, so
+    // tracker noise, and the brief reversal part way through a close when the
+    // camera stops looking at the room and starts looking at the keyboard,
+    // cannot move the picture - while a real unfold glides.
+    //
+    // A hold-then-release ratchet was tried here first and was worse: it froze
+    // the picture and then released about a fifth of the travel in one step,
+    // roughly twice a second, which read as the blur snapping rather than
+    // travelling up the screen.
+    if (closingTravel >= state.peakTravel) {
       state.peakTravel = closingTravel;
-      state.retraceAt = 0;
-    } else if (state.peakTravel - closingTravel > retraceDeadband) {
-      if (!state.retraceAt) state.retraceAt = now;
-      else if (now - state.retraceAt > settings.retraceHoldMs) state.peakTravel = closingTravel;
     } else {
-      state.retraceAt = 0;
+      const follow = Math.min(1, dt / Math.max(0.02, Number(settings.releaseFollowSeconds) || 0.25));
+      state.peakTravel += (closingTravel - state.peakTravel) * follow;
     }
     state.maxPeak = Math.max(state.maxPeak, state.peakTravel);
 
@@ -420,17 +420,22 @@
       state.engagedAt = now;
       state.phase = 'tracking';
       hideHint();
+      setInteractive(true);
     }
 
     // The travel maps onto the angle the lid is at, and the fold stops at
     // `foldAngle`: past that the lid keeps going but the picture does not,
-    // because a deeper fold only buries it under black.
+    // because a deeper fold only buries it under black. `neutralBand` leaves a
+    // dead zone either side of the rest angle so the lid can sit at a working
+    // angle with no blur at all.
     const restAngle = Number(settings.restAngle);
     const foldAngle = Number(settings.foldAngle) || 50;
     const span = Math.max(1, restAngle - foldAngle);
-    const rawAngle = restAngle - (state.peakTravel / full) * restAngle * settings.trackerGain;
+    const neutralBand = Math.max(0, Number(settings.neutralBand) || 0);
+    const degreesClosed = (state.peakTravel / full) * restAngle * settings.trackerGain;
+    const pastNeutral = Math.max(0, degreesClosed - neutralBand);
 
-    let target = NS.gradient.clamp01((restAngle - rawAngle) / span);
+    let target = NS.gradient.clamp01(pastNeutral / span);
     if (state.releasing) target = 0;
     trackerSpring.advance(target, dt, settings.trackerSpringFrequency);
     const progress = NS.gradient.clamp01(trackerSpring.value);
@@ -449,17 +454,30 @@
       return;
     }
 
+    // 'click' means the run stays up until the mouse is clicked, with no idle
+    // timeout and no cap, so the camera stays on until then.
+    if (settings.releaseOn === 'click') return;
+
     // Release only after a real close, and only once the lid is back at rest.
-    // Comparing against the peak rather than against zero is what stops a
-    // mid-close reversal from throwing the effect away.
     const closedProperly = state.maxPeak > full * 0.25;
-    if (closedProperly && state.peakTravel < full * settings.retraceReleaseFraction) {
+    if (closedProperly && state.peakTravel < full * settings.releaseFraction) {
       beginRelease('back at rest');
     } else if (!closedProperly && now - state.lastMoveAt > settings.idleReleaseMs) {
       beginRelease('no lid movement');
     } else if (now - state.armedAt > settings.maxArmedMs) {
       beginRelease('armed for too long');
     }
+  }
+
+  /**
+   * Whether the overlay takes mouse input. While the effect is armed and waiting
+   * it stays click-through so the desktop keeps working; once the picture is up
+   * it takes clicks, because a click is how the run is ended by hand.
+   */
+  function setInteractive(on) {
+    if (!window.winDuoBridge || !window.winDuoBridge.setInteractive) return;
+    if (state) state.interactive = on;
+    window.winDuoBridge.setInteractive(on);
   }
 
   /**
@@ -489,6 +507,7 @@
   function beginRelease(reason) {
     state.releasing = true;
     state.releaseReason = reason;
+    setInteractive(false);
     if (tracker) tracker.close();
     if (window.winDuoBridge && window.winDuoBridge.mark) {
       window.winDuoBridge.mark(`release:${reason}`);
@@ -632,6 +651,7 @@
       retraceAt: 0,
       lastIdleTravel: 0,
       lastMoveAt: performance.now(),
+      interactive: false,
       rate: 0,
       trace: [],
       quality: 0,
@@ -771,4 +791,14 @@
     });
     if (selfTest) window.winDuoBridge.onSelftestPayload((payload) => window.__winDuoSelftest.store(payload));
   }
+
+  // A click ends the run by hand rather than waiting for the lid to come back.
+  // While armed and waiting the overlay is click-through and never sees this;
+  // once the picture is up it takes input, which is the trade that makes the
+  // click possible at all.
+  document.addEventListener('mousedown', () => {
+    if (!state || state.releasing || !state.engaged) return;
+    beginRelease('clicked');
+  });
+  document.addEventListener('contextmenu', (event) => event.preventDefault());
 })();

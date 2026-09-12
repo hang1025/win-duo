@@ -108,6 +108,11 @@ Then:
 5. **Let go.** When the lid is back at its resting angle the picture eases flat, fades out,
    and the camera light goes off.
 
+**A click anywhere ends a run immediately**, whichever ending is configured — while the
+picture is up the overlay takes mouse input instead of passing it through, so that a click
+means stop. Set `releaseOn` to `click` and a run never times out at all: it stays folded and
+the camera stays on until you click.
+
 There is no angle at which the effect switches itself off. It ends when the lid comes back to
 rest, when nothing has moved for fifteen seconds after arming, or after five minutes as a cap
 on how long the camera may stay on.
@@ -209,10 +214,14 @@ worth touching first:
 | `thresholdAngle` | 100° | Used by the scripted animation: the angle the fold starts at. |
 | `blurSpan` | 40° | Degrees of lid travel from the trigger angle to full blur. |
 | `viewingDistance` | 3× screen height | Eye distance. Lower is a stronger perspective. **3 is what a seated user at a laptop flat on a desk actually measures** — eyes about 60 cm from the hinge, screen height 21.5 cm. Mac Duo ships 6, which is much flatter than a laptop on a desk ever is. |
-| `recession` | 1 | Degrees the picture turns away per degree of lid travel. |
+| `recession` | 0.4 | Degrees the picture turns away per degree of lid travel. Tuned by eye on a real laptop: at 1 the picture swings away far too fast and the fold reads as a swoop rather than a bend. |
 | `maxBlurRadius` | 90 px | Blur radius at full strength. Matched against the reference clip, where the icons are soft blobs by its deepest frame. Lower it to keep reading the screen instead. |
 | `maxDim` | 0.85 | How black the far edge goes. |
+| `dimReach` | 0.9 | Height at which the dimming saturates. Below 1 the top of the picture goes uniformly dark, which reads as a black band rather than a gradient. |
+| `blurCurve` | 1 | Exponent on the closing travel for the blur. Above 1 the blur arrives late and then rushes. |
 | `blurEvenness` | 0 | Blur at the hinge edge as a fraction of the far edge. |
+| `neutralBand` | 0° | Degrees either side of the rest angle where the picture stays completely flat, so the lid can move within a working range with no blur at all. |
+| `releaseOn` | `auto` | `auto` ends the run when the lid comes back to rest, or after an idle timeout. `click` never times out and keeps the camera on until you click. Clicking always ends a run, either way. |
 | `showAngleReadout` | on | Draws the tracked angle, the travel and the tracker's confidence in the corner. |
 
 The defaults are tuned for a laptop **flat on a desk**, which is where the usable window is
@@ -432,6 +441,8 @@ npm start
 4. **开盖。** 它反向展平回去。
 5. **松手。** 盖子回到静止角后，画面缓动归平、淡出，摄像头指示灯熄灭。
 
+**鼠标单击可以随时立刻结束一次运行**，无论上面配的是哪种结束方式——画面出现后覆盖层会接管鼠标输入而不是穿透过去，所以点击就意味着"停"。把 `releaseOn` 设成 `click`，运行就完全不超时：画面一直折着、摄像头一直开着，直到你点击。
+
 待命后 15 秒内没有任何动作，它会自动解除待命并把屏幕还给你。运行之外，摄像头指示灯永远不会亮。
 
 程序常驻托盘，没有主窗口。托盘菜单里有「播放开合效果」「设置…」「启用效果」「开机时启动」「退出」。
@@ -505,10 +516,14 @@ colour.rgb *= (1.0 - uMaxDim * fade);   // fade 随高度上升，走 smoothstep
 | `thresholdAngle` | 100° | 脚本动画用的：从多少度开始折。 |
 | `blurSpan` | 40° | 从触发角再走多少度达到最大模糊。 |
 | `viewingDistance` | 3 × 屏高 | 眼睛距离。越小透视越强。**3 是"平放桌面 + 正常坐姿"的真实值**：眼睛离铰链约 60cm，屏高 21.5cm。Mac Duo 默认 6，那个透视比笔记本平放桌面实际情况弱得多。 |
-| `recession` | 1 | 盖子每转一度，画面转开多少度。 |
+| `recession` | 0.4 | 盖子每转一度，画面转开多少度。在真机上按手感调出来的值：取 1 时画面转得太快，读起来像"甩出去"而不是"折过去"。 |
 | `maxBlurRadius` | 90 px | 满强度时的模糊半径。这个值是对着参考视频调的——它最深的那一帧里图标已经糊成色块。想看得更清就调小。 |
 | `maxDim` | 0.85 | 远端最终的黑度。 |
+| `dimReach` | 0.9 | 压暗饱和的高度。小于 1 时画面上部会整片变暗，读起来像一条黑带而不是渐变。 |
+| `blurCurve` | 1 | 模糊随合盖行程的曲线指数。大于 1 会让模糊来得晚、然后猛冲。 |
 | `blurEvenness` | 0 | 铰链一侧的模糊，相对远端满值的比例。 |
+| `neutralBand` | 0° | 静止角两侧这个度数范围内画面完全平整，让你在工作角度区间内活动时完全没有模糊。 |
+| `releaseOn` | `auto` | `auto`：盖子回位或超时结束。`click`：不超时，摄像头一直开着直到你点击。无论哪种，点击都能随时结束。 |
 | `showAngleReadout` | 开 | 在角落显示实时角度、行程和追踪置信度。 |
 
 默认参数是按**笔记本平放桌面**调的——那正是可视窗口最窄的情况。按几何算下来（眼睛在桌面上方约 45cm、离铰链约 60cm、屏幕高 21.5cm）：屏幕在约 **105°** 时正对你的眼睛，在约 **60–65°** 时开始看不清。所以效果必须在**这四十度之内**演完。这就是静止角取 105（而不是 Mac Duo 的 90）、模糊在 65° 收尾（而不是 30°）的原因。

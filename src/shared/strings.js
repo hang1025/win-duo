@@ -43,6 +43,16 @@
         sweep: 'Scripted animation',
         hint: 'Following the lid reads the angle from the built-in webcam. The camera light comes on only while armed, and no frames are stored.',
       },
+      neutralBand: {
+        label: 'Flat zone',
+        hint: 'Degrees either side of the rest angle where the picture stays completely flat. Set it to the range you move the lid within while working.',
+      },
+      releaseOn: {
+        label: 'Ending the run',
+        auto: 'When the lid comes back to rest',
+        click: 'Only when I click',
+        hint: 'On "only when I click" the run never times out and the camera stays on until then. Clicking always ends a run, whichever is set.',
+      },
       showAngleReadout: { label: 'Show the tracked angle on screen' },
       restAngle: {
         label: 'Rest angle',
@@ -131,6 +141,16 @@
         camera: '跟随真实盖子（摄像头）',
         sweep: '脚本动画',
         hint: '跟随真实盖子的角度来自内置摄像头。指示灯只在待命期间亮起，画面一帧都不保存。',
+      },
+      neutralBand: {
+        label: '平整区间',
+        hint: '静止角两侧这个度数范围内画面完全平整。设成你工作时盖子会在其中活动的范围。',
+      },
+      releaseOn: {
+        label: '结束方式',
+        auto: '盖子回位时自动结束',
+        click: '只有我点击才结束',
+        hint: '选「只有我点击才结束」时，不会超时、摄像头会一直开着直到你点击。无论选哪个，点击都能随时结束。',
       },
       showAngleReadout: { label: '在屏幕上显示实时角度' },
       restAngle: {

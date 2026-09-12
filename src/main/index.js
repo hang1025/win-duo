@@ -341,6 +341,10 @@ function registerIpc() {
 
   ipcMain.on('wd:overlay-finished', (_event, report) => { endRun(report); });
 
+  ipcMain.on('wd:interactive', (_event, on) => {
+    if (overlay) overlay.setInteractive(Boolean(on));
+  });
+
   ipcMain.on('wd:mark', (_event, name, at) => {
     if (process.env.WIN_DUO_DEBUG) {
       console.log(`[win-duo] +${String(at - runStartedAt).padStart(4)}ms  ${name}`);

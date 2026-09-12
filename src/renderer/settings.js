@@ -18,6 +18,7 @@
   const SLIDERS = {
     'tracking-section': [
       { key: 'restAngle', min: 80, max: 130, step: 1, unit: '°' },
+      { key: 'neutralBand', min: 0, max: 25, step: 1, unit: '°' },
       { key: 'foldAngle', min: 20, max: 95, step: 1, unit: '°' },
       { key: 'trackerGain', min: 0.3, max: 3, step: 0.05, unit: '×' },
       // No unit: the number is an internal measure of image travel, and a unit
