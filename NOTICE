@@ -15,9 +15,11 @@ Changes made in this port, as required by section 4(b) of the license:
 
   - The lid angle sensor reader was removed. Mac Duo reads an Apple
     `AppleSPUHIDDevice` (HID usage page 0x20, usage 0x8A) that reports the hinge
-    angle directly. No equivalent exists on a normal Windows laptop, so the angle
-    is instead produced by a scripted sweep in
-    `src/main/defaults.js` and smoothed by the same critically damped spring.
+    angle directly. No equivalent exists on a normal Windows laptop - a probe of
+    all fourteen `Windows.Devices.Sensors` classes returns nothing - so the angle
+    is instead recovered from the built-in webcam, which is rigidly fixed to the
+    lid. See `src/renderer/lib/lid-tracker.js`. A scripted sweep remains as the
+    fallback when the camera cannot be opened.
   - Screen capture was reimplemented on Electron's `desktopCapturer` in place of
     ScreenCaptureKit.
   - Metal and MetalPerformanceShaders were replaced by WebGL2, and the Gaussian
@@ -28,9 +30,16 @@ Changes made in this port, as required by section 4(b) of the license:
   - The AppKit overlay window, menu bar item and SwiftUI settings panel were
     replaced by an Electron BrowserWindow, a tray menu, and an HTML settings
     page.
-  - The lid angle sensor and its whole trigger policy (velocity prediction,
-    pre-warm capture, hysteresis, idle timeout) were removed along with it, and
-    replaced by a global hotkey and a tray menu item.
+  - The trigger policy was replaced. Mac Duo's velocity prediction, pre-warm
+    capture, hysteresis and idle timeout all assume a sensor that reports
+    continuously and for free; a camera has an indicator light and cannot run
+    unattended, so the trigger is a global hotkey that arms the run, and the
+    release is driven by the tracked travel returning to rest, an idle timeout,
+    and a hard cap on how long the camera may stay on.
+  - The tuning defaults were retuned for a laptop flat on a desk rather than a
+    MacBook: trigger angle 100 rather than 90, blur span 40 rather than 60, eye
+    distance 3 screen heights rather than 6, and a softer maximum blur and
+    dimming.
 
 Files that carry ported logic, with their Mac Duo counterparts:
 
@@ -40,3 +49,6 @@ Files that carry ported logic, with their Mac Duo counterparts:
   src/renderer/lib/spring.js     <-> Sources/MacDuo/CriticallyDampedSpring.swift
   src/renderer/lib/gradient.js   <-> Sources/MacDuo/BlurGradient.swift
   src/main/defaults.js           <-> Sources/MacDuo/Preferences.swift
+
+Everything else is new work, including `src/renderer/lib/lid-tracker.js`, which
+has no counterpart because Mac Duo never needed one.
