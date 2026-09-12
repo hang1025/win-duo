@@ -16,6 +16,8 @@
     "diagnose": "electron tools/diagnose-overlay.js",
     "icons": "electron tools/make-icon.js",
     "docs:image": "electron tools/make-docs-image.js",
+    "recon": "electron tools/lid-recon/main.js",
+    "recon:selftest": "electron tools/lid-recon/main.js --camera-selftest",
     "dist": "electron-builder --win"
   },
   "keywords": [

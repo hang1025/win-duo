@@ -1,0 +1,136 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'"
+    />
+    <title>Lid signal recon</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #101114;
+        --card: #191b20;
+        --line: #2a2d35;
+        --text: #e9ebf1;
+        --muted: #8f96a5;
+        --accent: #5b8cff;
+        --good: #3ddc84;
+        --warn: #ffc247;
+        --bad: #ff5f57;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 16px 18px 22px;
+        background: var(--bg);
+        color: var(--text);
+        font: 13px/1.5 "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+        user-select: none;
+      }
+      h1 { margin: 0 0 2px; font-size: 15px; font-weight: 600; }
+      .sub { margin: 0 0 14px; color: var(--muted); font-size: 12px; }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 12px 14px;
+        margin-bottom: 12px;
+      }
+      .inventory { font-size: 12px; color: var(--muted); white-space: pre-wrap; }
+      .inventory b { color: var(--text); font-weight: 600; }
+      #banner {
+        text-align: center;
+        font-size: 20px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        padding: 6px 0 10px;
+        min-height: 34px;
+      }
+      #bannerHint { text-align: center; color: var(--muted); font-size: 12px; min-height: 18px; }
+      .bar { height: 6px; background: #23262d; border-radius: 3px; overflow: hidden; margin-top: 10px; }
+      .bar > i { display: block; height: 100%; width: 0; background: var(--accent); }
+      .row {
+        display: grid;
+        grid-template-columns: 96px 82px 1fr 96px;
+        align-items: center;
+        gap: 10px;
+        padding: 7px 0;
+        border-bottom: 1px solid #22252c;
+      }
+      .row:last-child { border-bottom: 0; }
+      .row .name { font-weight: 600; }
+      .row .value { font-variant-numeric: tabular-nums; color: var(--accent); }
+      .row canvas { width: 100%; height: 34px; display: block; }
+      .badge { font-size: 11px; text-align: right; color: var(--muted); }
+      .badge.ok { color: var(--good); }
+      .badge.warn { color: var(--warn); }
+      .badge.bad { color: var(--bad); }
+      .actions { display: flex; gap: 8px; align-items: center; }
+      button {
+        padding: 9px 16px;
+        border-radius: 8px;
+        border: 1px solid var(--line);
+        background: #23262d;
+        color: var(--text);
+        font: inherit;
+        cursor: pointer;
+      }
+      button.primary { background: var(--accent); border-color: var(--accent); color: #0b1220; font-weight: 600; }
+      button:disabled { opacity: 0.45; cursor: default; }
+      #log {
+        height: 132px;
+        overflow-y: auto;
+        font: 11.5px/1.55 Consolas, "Cascadia Mono", monospace;
+        color: var(--muted);
+        white-space: pre-wrap;
+      }
+      #verdict { white-space: pre-wrap; font: 12px/1.6 Consolas, "Cascadia Mono", monospace; }
+      .hint { color: var(--muted); font-size: 11.5px; margin-top: 8px; }
+      .switches { display: flex; flex-direction: column; gap: 8px; }
+      .switch { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+      .switch span { font-size: 12.5px; }
+      input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); }
+    </style>
+  </head>
+  <body>
+    <h1>Lid signal recon</h1>
+    <p class="sub">找一个“随盖子角度单调变化”的物理量。全程约 80 秒。</p>
+
+    <div class="card">
+      <div class="inventory" id="inventory">正在探测传感器…</div>
+    </div>
+
+    <div class="card">
+      <div id="banner">准备就绪</div>
+      <div id="bannerHint">点下面的按钮开始。按屏幕提示的节奏操作。</div>
+      <div class="bar"><i id="progress"></i></div>
+      <div class="actions" style="margin-top: 12px">
+        <button class="primary" id="start">开始记录</button>
+        <button id="stop" disabled>中止</button>
+        <button id="save" disabled>重新分析并保存</button>
+      </div>
+      <div class="switches" style="margin-top: 10px">
+        <label class="switch">
+          <span>只测摄像头（跳过声学 / Wi-Fi / 光照，3 次循环约 40 秒）</span>
+          <input type="checkbox" id="cameraOnly" checked />
+        </label>
+      </div>
+      <div class="hint" id="modeHint">摄像头是唯一在每台笔记本上都必然随盖子转动的信号。</div>
+    </div>
+
+    <div class="card" id="signals"></div>
+
+    <div class="card">
+      <div id="verdict">（还没有结果）</div>
+    </div>
+
+    <div class="card">
+      <div id="log"></div>
+    </div>
+
+    <script src="analyze.js"></script>
+    <script src="recon.js"></script>
+  </body>
+</html>

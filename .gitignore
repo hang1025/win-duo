@@ -5,6 +5,9 @@ out/
 # Self test dumps. Regenerate with `npm run selftest`.
 selftest-output/
 
+# Lid recon recordings.
+lid-recon-output/
+
 # Electron build leftovers
 *.log
 npm-debug.log*
