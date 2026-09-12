@@ -36,6 +36,11 @@ async function shotFold({ trigger, overlay, wait, prefs }) {
   await wait(1200);
 
   const full = Number(prefs.values.fullTravel) || 170;
+  const restAngle = Number(prefs.values.restAngle) || 105;
+  const foldAngle = Number(prefs.values.foldAngle) || 50;
+  // Levels run from flat to the deepest fold the effect ever shows, which is
+  // `foldAngle`, reached part way through a close and held past it.
+  const foldTravel = full * ((restAngle - foldAngle) / restAngle);
   // The synthetic scene moves one canvas row for every four source pixels.
   const sourcePixelsPerRow = 4;
 
@@ -57,7 +62,7 @@ async function shotFold({ trigger, overlay, wait, prefs }) {
   const files = [];
   for (const level of LEVELS) {
     // eslint-disable-next-line no-await-in-loop
-    const stepped = await step(Math.round(full * level * sourcePixelsPerRow));
+    const stepped = await step(Math.round(foldTravel * level * sourcePixelsPerRow));
     // Let the spring settle before looking: the capture itself perturbs the
     // frame rate enough that anything caught mid-motion is misleading.
     // eslint-disable-next-line no-await-in-loop

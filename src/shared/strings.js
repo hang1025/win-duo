@@ -48,6 +48,10 @@
         label: 'Rest angle',
         hint: 'The lid angle you work at, and the angle the fold starts from. Set it to whatever your screen stands at when you are sitting normally.',
       },
+      foldAngle: {
+        label: 'Angle the fold finishes at',
+        hint: 'The fold stops here and holds as the lid keeps going. About 50 degrees: past that the picture is mostly black, so following the lid further only buries it.',
+      },
       trackerGain: {
         label: 'Follow strength',
         hint: 'How much fold you get per unit of lid movement. Raise it if the fold does not go far enough before the screen fades out.',
@@ -132,6 +136,10 @@
       restAngle: {
         label: '静止角',
         hint: '你平时使用时的盖子角度，也是折叠的起点。设成你正常坐姿下屏幕实际张开的角度。',
+      },
+      foldAngle: {
+        label: '折叠封顶角度',
+        hint: '折到这个角度就停住，盖子再往下合画面也不变。约 50°：再深画面基本就全黑了，跟着盖子继续折只会把它埋掉。',
       },
       trackerGain: {
         label: '跟手强度',

@@ -422,13 +422,21 @@
       hideHint();
     }
 
-    let target = NS.gradient.clamp01((state.peakTravel / full) * settings.trackerGain);
+    // The travel maps onto the angle the lid is at, and the fold stops at
+    // `foldAngle`: past that the lid keeps going but the picture does not,
+    // because a deeper fold only buries it under black.
+    const restAngle = Number(settings.restAngle);
+    const foldAngle = Number(settings.foldAngle) || 50;
+    const span = Math.max(1, restAngle - foldAngle);
+    const rawAngle = restAngle - (state.peakTravel / full) * restAngle * settings.trackerGain;
+
+    let target = NS.gradient.clamp01((restAngle - rawAngle) / span);
     if (state.releasing) target = 0;
     trackerSpring.advance(target, dt, settings.trackerSpringFrequency);
     const progress = NS.gradient.clamp01(trackerSpring.value);
 
     state.progress = progress;
-    state.angle = Number(settings.restAngle) * (1 - progress);
+    state.angle = restAngle - progress * span;
     pushTrace(now);
 
     if (state.releasing) {

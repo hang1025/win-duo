@@ -203,14 +203,15 @@ worth touching first:
 | --- | --- | --- |
 | `angleSource` | `camera` | Follow the lid, or play the scripted animation. |
 | `restAngle` | 105° | The lid angle you work at, and the angle the fold starts from. Set it to whatever your screen stands at when you are sitting normally. |
+| `foldAngle` | 50° | Where the fold finishes; it holds there as the lid keeps going. Past about 50° the picture is mostly black, so following the lid further only buries it. |
 | `trackerGain` | 1 | How much fold you get per unit of lid movement. Raise it if the fold does not get far enough before the screen fades out. |
 | `fullTravel` | 170 rows | How much image travel a complete close produces. Re-learned automatically; leave it alone unless the fold consistently stops short or overshoots. |
 | `thresholdAngle` | 100° | Used by the scripted animation: the angle the fold starts at. |
 | `blurSpan` | 40° | Degrees of lid travel from the trigger angle to full blur. |
 | `viewingDistance` | 3× screen height | Eye distance. Lower is a stronger perspective. **3 is what a seated user at a laptop flat on a desk actually measures** — eyes about 60 cm from the hinge, screen height 21.5 cm. Mac Duo ships 6, which is much flatter than a laptop on a desk ever is. |
 | `recession` | 1 | Degrees the picture turns away per degree of lid travel. |
-| `maxBlurRadius` | 45 px | Blur radius at full strength. Far lower than Mac Duo's 135: the stronger perspective already carries the motion, and heavy blur trades the fold away for a smear. |
-| `maxDim` | 0.55 | How black the far edge goes. Well short of 1: going fully black makes the picture vanish while the panel is still readable, throwing away the last third of the window. |
+| `maxBlurRadius` | 90 px | Blur radius at full strength. Matched against the reference clip, where the icons are soft blobs by its deepest frame. Lower it to keep reading the screen instead. |
+| `maxDim` | 0.85 | How black the far edge goes. |
 | `blurEvenness` | 0 | Blur at the hinge edge as a fraction of the far edge. |
 | `showAngleReadout` | on | Draws the tracked angle, the travel and the tracker's confidence in the corner. |
 
@@ -498,14 +499,15 @@ colour.rgb *= (1.0 - uMaxDim * fade);   // fade 随高度上升，走 smoothstep
 | --- | --- | --- |
 | `angleSource` | `camera` | 跟随真实盖子，还是播放脚本动画。 |
 | `restAngle` | 105° | 你平时使用时的盖子角度，也是折叠的起点。设成你正常坐姿下屏幕实际张开的角度。 |
+| `foldAngle` | 50° | 折叠在这里停住，盖子再往下合画面也不变。超过约 50° 画面基本全黑，跟着继续折只会把它埋掉。 |
 | `trackerGain` | 1 | 盖子动同样多时画面折多少。屏幕还没暗下去效果就折满了，就调小。 |
 | `fullTravel` | 170 行 | 一次完整合盖产生多少画面行程。会自动重新学习，一般不用管。 |
 | `thresholdAngle` | 100° | 脚本动画用的：从多少度开始折。 |
 | `blurSpan` | 40° | 从触发角再走多少度达到最大模糊。 |
 | `viewingDistance` | 3 × 屏高 | 眼睛距离。越小透视越强。**3 是"平放桌面 + 正常坐姿"的真实值**：眼睛离铰链约 60cm，屏高 21.5cm。Mac Duo 默认 6，那个透视比笔记本平放桌面实际情况弱得多。 |
 | `recession` | 1 | 盖子每转一度，画面转开多少度。 |
-| `maxBlurRadius` | 95 px | 满强度时的模糊半径。 |
-| `maxDim` | 0.85 | 远端最终的黑度。不是 1：全黑会让画面在屏幕还能看清的时候就消失，白白丢掉可视窗口的最后三分之一。 |
+| `maxBlurRadius` | 90 px | 满强度时的模糊半径。这个值是对着参考视频调的——它最深的那一帧里图标已经糊成色块。想看得更清就调小。 |
+| `maxDim` | 0.85 | 远端最终的黑度。 |
 | `blurEvenness` | 0 | 铰链一侧的模糊，相对远端满值的比例。 |
 | `showAngleReadout` | 开 | 在角落显示实时角度、行程和追踪置信度。 |
 

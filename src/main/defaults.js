@@ -25,6 +25,12 @@ const DEFAULTS = {
   // re-learned from every complete close, because how far the scene slides
   // depends on the camera, the room and how the user sits.
   fullTravel: 170,
+  // The angle the fold finishes at, and it holds there as the lid keeps going.
+  // About 50 degrees is as far as the effect is ever worth showing: it is where
+  // the reference clip bottoms out, and it is roughly where a laptop panel stops
+  // being readable anyway. Letting the fold follow the lid past this buries the
+  // picture under its own black.
+  foldAngle: 50,
   // Multiplier on the tracked travel, for taste.
   trackerGain: 1,
   // Fraction of fullTravel that counts as "the lid is moving" and, once folded,
@@ -74,18 +80,15 @@ const DEFAULTS = {
   // hinge, screen height 21.5 cm. Mac Duo ships 6, which assumes a much
   // stronger viewing distance than a laptop on a desk ever has.
   viewingDistance: 3,
-  // Gaussian blur radius at full effect, in points. Much lower than Mac Duo's
-  // 135: the stronger perspective already carries the motion, and heavy blur
-  // trades the fold away for a smear. Lower still if you want the content to
-  // stay readable right to the end.
-  maxBlurRadius: 45,
+  // Gaussian blur radius at full effect, in points. Matched against the
+  // reference clip: by its deepest frame the icons are soft blobs, so this is
+  // deliberately heavy. Lower it if you would rather keep reading the screen.
+  maxBlurRadius: 90,
   // Blur at the hinge edge as a fraction of the blur at the far edge. 0 leaves
   // the hinge edge sharp, 1 blurs the picture evenly.
   blurEvenness: 0,
-  // Black overlay opacity where the blur is at full strength, 0...1. Well short
-  // of 1: going fully black at the far edge makes the picture vanish while the
-  // panel is still readable, throwing away the last third of the window.
-  maxDim: 0.55,
+  // Black overlay opacity where the blur is at full strength, 0...1.
+  maxDim: 0.85,
   // Height at which the dimming reaches full strength, as a fraction of the
   // screen height, measured from the hinge edge.
   dimReach: 0.5,
