@@ -189,6 +189,8 @@ nothing to see.
 
 ### Settings
 
+![The settings panel](docs/settings.png)
+
 The settings panel writes to `settings.json` in Electron's user data directory. The ones
 worth touching first:
 
@@ -463,6 +465,8 @@ colour.rgb *= (1.0 - uMaxDim * fade);   // fade 随高度上升，走 smoothstep
 效果已待命但盖子还没动的时候，覆盖层的透明度保持为 0。桌面在下面**保持是活的**，而不是被一张冻结的截图替换掉；淡入正好落在一张没被动过的桌面上——因为平放的那一帧和桌面像素级一致，你什么也看不见。
 
 ### 设置
+
+![设置面板](docs/settings.png)
 
 设置面板写入 Electron 用户数据目录下的 `settings.json`。最该先动的几个：
 

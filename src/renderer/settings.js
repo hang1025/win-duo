@@ -19,7 +19,9 @@
     'tracking-section': [
       { key: 'restAngle', min: 80, max: 130, step: 1, unit: '°' },
       { key: 'trackerGain', min: 0.3, max: 3, step: 0.05, unit: '×' },
-      { key: 'fullTravel', min: 60, max: 400, step: 5, unit: 'row' },
+      // No unit: the number is an internal measure of image travel, and a unit
+      // label here would invite people to interpret it as something physical.
+      { key: 'fullTravel', min: 60, max: 400, step: 5 },
     ],
     'angle-section': [
       { key: 'thresholdAngle', min: 40, max: 120, step: 1, unit: '°' },

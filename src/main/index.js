@@ -1,5 +1,6 @@
 'use strict';
 
+const fs = require('fs');
 const path = require('path');
 const {
   app,
@@ -401,6 +402,23 @@ async function onReady() {
   registerHotkey();
   registerIpc();
   applyLoginItem(prefs.values.launchAtLogin);
+
+  // `--shot-settings <path>`: open the settings panel, screenshot it and quit.
+  // Used to check the panel renders, and to keep the README's picture current.
+  const shotIndex = ARGS.indexOf('--shot-settings');
+  if (shotIndex !== -1 && ARGS[shotIndex + 1]) {
+    openSettings();
+    await wait(1800);
+    try {
+      const image = await settingsWindow.webContents.capturePage();
+      fs.writeFileSync(ARGS[shotIndex + 1], image.toPNG());
+      console.log(`[win-duo] wrote ${ARGS[shotIndex + 1]}`);
+    } catch (error) {
+      console.error('[win-duo] settings screenshot failed:', error.message);
+    }
+    app.exit(0);
+    return;
+  }
 
   // Warm the window up so the first trigger does not pay for a page load.
   overlay.ensure().catch((error) => {
