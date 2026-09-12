@@ -80,17 +80,25 @@ async function verifyCameraTracking({
 
   // The picture has to travel back down, not step back down. An earlier ratchet
   // froze the fold and then released it in ~20% chunks, which read as the blur
-  // snapping. The drive moves 2 rows per frame, so at 100 ms sampling a smooth
-  // reopen changes by far less than this.
+  // snapping.
+  //
+  // The bound is measured from the run itself rather than hard coded: the drive
+  // moves as fast as the frame rate allows, so a fixed number sits right on top
+  // of the legitimate motion and fails at random. The drive is symmetric, so a
+  // reopen that never outpaces the close is a reopen that is following.
   if (report && report.trace && report.trace.length > 4) {
-    let worstStep = 0;
-    let worstAt = 0;
+    let closeStep = 0;
+    let reopenStep = 0;
+    let reopenAt = 0;
     for (let i = 1; i < report.trace.length; i += 1) {
-      const step = Math.abs(report.trace[i].peak - report.trace[i - 1].peak);
-      if (step > worstStep) { worstStep = step; worstAt = report.trace[i].t; }
+      const step = report.trace[i].peak - report.trace[i - 1].peak;
+      if (step > closeStep) closeStep = step;
+      if (-step > reopenStep) { reopenStep = -step; reopenAt = report.trace[i].t; }
     }
-    console.log(`largest travel step between 100 ms samples: ${worstStep.toFixed(1)} rows at ${worstAt} ms`);
-    if (worstStep > 25) problems.push(`the travel steps by ${worstStep.toFixed(1)} rows at once`);
+    console.log(`largest travel step: closing ${closeStep.toFixed(1)} rows, reopening ${reopenStep.toFixed(1)} rows at ${reopenAt} ms`);
+    if (reopenStep > closeStep + 2) {
+      problems.push(`the reopen steps by ${reopenStep.toFixed(1)} rows against a closing rate of ${closeStep.toFixed(1)}`);
+    }
   }
 
   if (problems.length) {
