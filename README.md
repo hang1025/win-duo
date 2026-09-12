@@ -108,8 +108,13 @@ Then:
 5. **Let go.** When the lid is back at its resting angle the picture eases flat, fades out,
    and the camera light goes off.
 
-If nothing happens for fifteen seconds after arming, it disarms itself and hands the screen
-back. The camera light is never on outside a run.
+There is no angle at which the effect switches itself off. It ends when the lid comes back to
+rest, when nothing has moved for fifteen seconds after arming, or after five minutes as a cap
+on how long the camera may stay on.
+
+`npm run shortcut` puts a launcher on the desktop, with the app's own icon. It points straight
+at the Electron binary rather than at `npm start`, because Electron is a GUI application and
+launching it that way opens no console window behind the tray icon.
 
 The app lives in the tray. There is no main window: the tray menu has *Play the fold*,
 *Settings…*, *Enabled*, *Start at login* and *Quit*.
@@ -267,6 +272,12 @@ Measured on a 2560×1600 laptop at 150% scaling:
 ```
 
 The camera opens alongside the screen grab, so arming is not slowed by it.
+
+Every run also writes `last-run.json` and a one-line summary to `runs.log`, both in Electron's
+user data directory. The JSON holds a sample every 100 ms of travel, ratcheted peak, progress,
+angle, tracker confidence, strips used and frame rate. When a fold looks wrong on someone
+else's machine, that trace is the only way to see what the tracker actually did — a photograph
+of a wrong-looking fold does not contain the numbers that explain it.
 
 So about **0.6 s from hotkey to first frame, and 0.5 s of that is Chromium's one-shot screen
 grab.** That cost is a session setup, not a transfer: it measured 470–550 ms whether the

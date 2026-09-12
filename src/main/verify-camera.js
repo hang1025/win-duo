@@ -65,7 +65,8 @@ async function verifyCameraTracking({ trigger, overlay, wait, isPlaying, prefs, 
   if (closing.state && !(closing.state.angle < restAngle - 5)) problems.push(`the angle did not drop (${closing.state && closing.state.angle})`);
   if (closing.state && closing.state.opacity < 0.9) problems.push('the picture never became visible');
   if (!report || report.reason !== 'back at rest') problems.push(`the release reason was ${report && report.reason}`);
-  if (report && !(report.peakTravel > fullTravel * 0.15)) problems.push(`the peak travel was not reported (${report && report.peakTravel})`);
+  if (report && !(report.maxPeak > fullTravel * 0.15)) problems.push(`the peak travel was not reported (${report && report.maxPeak})`);
+  if (report && !(report.peakTravel < report.maxPeak * 0.5)) problems.push('the fold did not ratchet back down on reopen');
   if (!hidden) problems.push('the overlay stayed up');
 
   if (problems.length) {

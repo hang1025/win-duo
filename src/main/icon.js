@@ -131,6 +131,38 @@ function iconPng(size) {
   return encodePng(size, size, drawIcon(size));
 }
 
+/**
+ * The same drawing as a Windows `.ico`, for desktop shortcuts and the window
+ * icon. Each entry holds a PNG rather than a DIB, which every supported Windows
+ * version reads.
+ */
+function iconIco(sizes = [16, 24, 32, 48, 64, 128, 256]) {
+  const images = sizes.map((size) => ({ size, png: iconPng(size) }));
+
+  const header = Buffer.alloc(6);
+  header.writeUInt16LE(0, 0); // reserved
+  header.writeUInt16LE(1, 2); // type: icon
+  header.writeUInt16LE(images.length, 4);
+
+  const entries = Buffer.alloc(16 * images.length);
+  let offset = 6 + 16 * images.length;
+  images.forEach((image, index) => {
+    const at = index * 16;
+    // 256 and up are encoded as 0 in the single-byte width and height fields.
+    entries[at] = image.size >= 256 ? 0 : image.size;
+    entries[at + 1] = image.size >= 256 ? 0 : image.size;
+    entries[at + 2] = 0; // palette size
+    entries[at + 3] = 0; // reserved
+    entries.writeUInt16LE(1, at + 4); // colour planes
+    entries.writeUInt16LE(32, at + 6); // bits per pixel
+    entries.writeUInt32LE(image.png.length, at + 8);
+    entries.writeUInt32LE(offset, at + 12);
+    offset += image.png.length;
+  });
+
+  return Buffer.concat([header, entries, ...images.map((image) => image.png)]);
+}
+
 /** A `nativeImage`-ready data URL for the tray. */
 function trayIconDataUrl() {
   return `data:image/png;base64,${iconPng(32).toString('base64')}`;
@@ -141,4 +173,4 @@ function appIconPng() {
   return iconPng(256);
 }
 
-module.exports = { iconPng, trayIconDataUrl, appIconPng, encodePng };
+module.exports = { iconPng, iconIco, trayIconDataUrl, appIconPng, encodePng };

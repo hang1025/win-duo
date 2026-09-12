@@ -7,9 +7,11 @@
   "type": "commonjs",
   "scripts": {
     "start": "electron .",
+    "shortcut": "node tools/install-desktop-icon.js",
     "selftest": "electron . --selftest",
     "selftest:real": "electron . --selftest --real",
     "verify": "electron . --verify",
+    "verify:camera": "electron . --verify-camera",
     "timing": "electron . --timing",
     "check:settings": "electron . --check-settings",
     "bench": "electron tools/bench-capture.js",

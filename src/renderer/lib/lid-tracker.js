@@ -148,12 +148,15 @@ window.WinDuo = window.WinDuo || {};
 
       this.stripWidth = this.width / this.strips;
       this.total = 0;
+      this.residual = 0;
       this.quality = 0;
       this.usedStrips = 0;
       this.available = false;
       this.note = '';
       this.previous = null;
       this.offset = 0;
+      this.frames = 0;
+      this.startedAt = 0;
     }
 
     async open() {
@@ -203,9 +206,18 @@ window.WinDuo = window.WinDuo || {};
     /** The angle origin is here: everything is measured from the last reset. */
     reset() {
       this.total = 0;
+      this.residual = 0;
       this.previous = null;
       this.quality = 0;
       this.usedStrips = 0;
+      this.frames = 0;
+      this.startedAt = Date.now();
+    }
+
+    /** Frames per second since the last reset, for the debug readout. */
+    rate() {
+      const elapsed = (Date.now() - this.startedAt) / 1000;
+      return elapsed > 0.5 ? this.frames / elapsed : 0;
     }
 
     /** Accumulated travel since the last reset, in rows of the small canvas. */
@@ -263,11 +275,24 @@ window.WinDuo = window.WinDuo || {};
           // covers, and a mean would be dragged by them.
           const middle = median(shifts);
           this.quality = confidenceSum / shifts.length;
-          if (Math.abs(middle) > this.deadband) this.total += middle;
+
+          // The deadband sits on the running residual, not on each frame. A
+          // per-frame threshold is frame-rate dependent, and that is not a
+          // theoretical worry: on a 120 Hz panel a slow close moves only a
+          // fraction of a row per frame, and a per-frame test throws that motion
+          // away instead of accumulating it, so the fold stalls near flat.
+          // Accumulating first and committing in deadband-sized steps keeps slow
+          // movement while still refusing to let zero-mean noise wander.
+          this.residual += middle;
+          if (Math.abs(this.residual) > this.deadband) {
+            this.total += this.residual;
+            this.residual = 0;
+          }
         }
       }
 
       this.previous = strips;
+      this.frames += 1;
       return this.total;
     }
 

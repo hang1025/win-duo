@@ -35,6 +35,18 @@ const RUN_TIMEOUT_MS = 15000;
 
 const wait = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
 
+/**
+ * Exits, but not before stdout has had a chance to drain.
+ *
+ * `app.exit()` tears the process down immediately, and when stdout is a pipe -
+ * which is every CI run and every `| Select-String` - the last writes are still
+ * buffered and are simply lost. The checks looked like they had printed nothing
+ * while actually passing.
+ */
+function exitAfterFlush(code) {
+  setTimeout(() => app.exit(code), 150);
+}
+
 let prefs = null;
 let overlay = null;
 let tray = null;
@@ -114,6 +126,36 @@ async function trigger(overrides) {
   }
 }
 
+/**
+ * Writes the last run to disk, trace and all.
+ *
+ * When the fold behaves oddly on someone else's machine this file is the only
+ * way to see what the tracker actually did: a photograph of a wrong-looking
+ * fold does not contain the numbers that explain it.
+ */
+function saveLastRun(report) {
+  if (!report) return;
+  try {
+    const file = path.join(app.getPath('userData'), 'last-run.json');
+    fs.writeFileSync(file, `${JSON.stringify(report, null, 2)}\n`);
+    const line = [
+      new Date().toISOString(),
+      `mode=${report.mode}`,
+      `reason=${report.reason}`,
+      `peak=${Number(report.peakTravel).toFixed(1)}`,
+      `maxPeak=${Number(report.maxPeak).toFixed(1)}`,
+      `dir=${report.direction}`,
+      `fps=${report.fps}`,
+      `q=${report.quality}`,
+      `strips=${report.strips}`,
+      `armedMs=${report.armedMs}`,
+    ].join(' ');
+    fs.appendFileSync(path.join(app.getPath('userData'), 'runs.log'), `${line}\n`);
+  } catch (error) {
+    console.error('[win-duo] could not save the run report:', error.message);
+  }
+}
+
 function endRun(report) {
   playing = false;
   lastRunReport = report || null;
@@ -122,6 +164,7 @@ function endRun(report) {
     runWatchdog = null;
   }
   if (overlay) overlay.hide();
+  saveLastRun(report);
   calibrateFromRun(report);
 }
 
@@ -133,12 +176,15 @@ function endRun(report) {
  * teach the wrong scale, so only a run that got most of the way to shut and came
  * back counts. The estimate drifts towards the middle of what is seen rather
  * than being replaced, because individual closes vary.
+ *
+ * It reads `maxPeak`, not `peakTravel`: the fold ratchets, so by the time the
+ * run ends the live peak has already followed the lid back down to nothing.
  */
 function calibrateFromRun(report) {
   if (!prefs || !report || report.mode !== 'camera' || !report.engaged) return;
   if (report.reason !== 'back at rest') return;
 
-  const peak = Number(report.peakTravel);
+  const peak = Number(report.maxPeak);
   if (!Number.isFinite(peak) || peak <= 0) return;
 
   const current = Number(prefs.values.fullTravel) || 170;
@@ -325,10 +371,10 @@ async function onReady() {
 
   if (IS_SELFTEST) {
     try {
-      app.exit(await runSelfTest({ prefs, real: ARGS.includes('--real') }));
+      exitAfterFlush(await runSelfTest({ prefs, real: ARGS.includes('--real') }));
     } catch (error) {
       console.error('[win-duo] selftest failed:', error);
-      app.exit(1);
+      exitAfterFlush(1);
     }
     return;
   }
@@ -341,10 +387,10 @@ async function onReady() {
     try {
       const code = await checkSettings({ prefs, wait });
       process.exitCode = code;
-      app.exit(code);
+      exitAfterFlush(code);
     } catch (error) {
       console.error('[win-duo] settings check failed:', error);
-      app.exit(1);
+      exitAfterFlush(1);
     }
     return;
   }
@@ -354,10 +400,10 @@ async function onReady() {
     registerIpc();
     try {
       process.exitCode = await timeOneRun({ trigger, overlay, wait, isPlaying: () => playing });
-      app.exit(process.exitCode);
+      exitAfterFlush(process.exitCode);
     } catch (error) {
       console.error('[win-duo] timing failed:', error);
-      app.exit(1);
+      exitAfterFlush(1);
     }
     return;
   }
@@ -375,10 +421,10 @@ async function onReady() {
         getLastReport: () => lastRunReport,
       });
       process.exitCode = code;
-      app.exit(code);
+      exitAfterFlush(code);
     } catch (error) {
       console.error('[win-duo] camera verification failed:', error);
-      app.exit(1);
+      exitAfterFlush(1);
     }
     return;
   }
@@ -390,10 +436,10 @@ async function onReady() {
       const code = await verifyOverlay({ trigger, overlay, wait, isPlaying: () => playing });
       if (process.env.WIN_DUO_DEBUG) console.log(`[win-duo] verify returning ${code}`);
       process.exitCode = code;
-      app.exit(code);
+      exitAfterFlush(code);
     } catch (error) {
       console.error('[win-duo] verify failed:', error);
-      app.exit(1);
+      exitAfterFlush(1);
     }
     return;
   }
@@ -416,7 +462,7 @@ async function onReady() {
     } catch (error) {
       console.error('[win-duo] settings screenshot failed:', error.message);
     }
-    app.exit(0);
+    exitAfterFlush(0);
     return;
   }
 
@@ -426,7 +472,16 @@ async function onReady() {
   });
 }
 
-if (!app.requestSingleInstanceLock()) {
+/**
+ * The headless check modes never show UI, and they are usually run while the app
+ * is sitting in the tray. Taking the single-instance lock would make them quit
+ * silently with a zero exit code - which is exactly what used to happen, and it
+ * looks like the checks passed when they never ran at all.
+ */
+const IS_CHECK = IS_SELFTEST || IS_VERIFY || IS_VERIFY_CAMERA || IS_TIMING
+  || IS_CHECK_SETTINGS || ARGS.includes('--shot-settings');
+
+if (!IS_CHECK && !app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on('second-instance', () => { openSettings(); });

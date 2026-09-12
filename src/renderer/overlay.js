@@ -225,8 +225,9 @@
     if (state.mode === 'camera') {
       readoutElement.textContent = [
         `角度 ${state.angle.toFixed(1)}°`,
-        `行程 ${state.travel.toFixed(1)} / ${Number(state.settings.fullTravel).toFixed(0)}`,
+        `行程 ${state.peakTravel.toFixed(0)}/${Number(state.settings.fullTravel).toFixed(0)}`,
         `${(state.progress * 100).toFixed(0)}%`,
+        `${Math.round(state.rate || 0)}fps`,
         `q${state.quality.toFixed(2)} ${state.usedStrips}/8`,
         state.releasing ? '收尾中' : (state.engaged ? '跟随中' : '待命'),
       ].join('  ·  ');
@@ -372,17 +373,16 @@
       state.travel = sampled;
       state.quality = tracker.quality;
       state.usedStrips = tracker.usedStrips;
+      state.rate = tracker.rate();
     }
 
     const full = Math.max(1, Number(settings.fullTravel) || 170);
     const engageRows = full * settings.engageFraction;
-    const releaseRows = full * settings.releaseFraction;
+    const retraceDeadband = full * settings.retraceFraction;
 
     // Which way the scene slides when the lid closes depends on how the camera
-    // is mounted, on how it is rotated, and on where the user is sitting, so the
-    // sign cannot be assumed. It is taken from the largest excursion seen: a
-    // close dwarfs anything else a run produces, and a bigger movement the other
-    // way simply re-latches it.
+    // is mounted and how the user sits, so the sign is latched from the largest
+    // excursion rather than assumed.
     const magnitude = Math.abs(state.travel);
     if (magnitude > engageRows && magnitude > state.peakMagnitude) {
       state.peakMagnitude = magnitude;
@@ -390,21 +390,43 @@
     }
     const closingTravel = state.travel * state.direction;
 
-    if (!state.engaged && closingTravel > engageRows) {
+    // A ratchet. The picture follows the furthest the lid has been closed and
+    // only follows it back down once a reversal has held for a moment. Two
+    // things make this necessary: tracker noise wobbling backwards, and the real
+    // reversal part way through a close, when the camera stops looking at the
+    // room and starts looking at the keyboard. Without it the fold jumps back
+    // mid-close, and a hard enough jump used to end the whole run.
+    if (closingTravel > state.peakTravel) {
+      state.peakTravel = closingTravel;
+      state.retraceAt = 0;
+    } else if (state.peakTravel - closingTravel > retraceDeadband) {
+      if (!state.retraceAt) state.retraceAt = now;
+      else if (now - state.retraceAt > settings.retraceHoldMs) state.peakTravel = closingTravel;
+    } else {
+      state.retraceAt = 0;
+    }
+    state.maxPeak = Math.max(state.maxPeak, state.peakTravel);
+
+    if (Math.abs(closingTravel - state.lastIdleTravel) > engageRows) {
+      state.lastIdleTravel = closingTravel;
+      state.lastMoveAt = now;
+    }
+
+    if (!state.engaged && state.peakTravel > engageRows) {
       state.engaged = true;
       state.engagedAt = now;
       state.phase = 'tracking';
       hideHint();
     }
-    if (closingTravel > state.peakTravel) state.peakTravel = closingTravel;
 
-    let target = NS.gradient.clamp01((closingTravel / full) * settings.trackerGain);
+    let target = NS.gradient.clamp01((state.peakTravel / full) * settings.trackerGain);
     if (state.releasing) target = 0;
     trackerSpring.advance(target, dt, settings.trackerSpringFrequency);
     const progress = NS.gradient.clamp01(trackerSpring.value);
 
     state.progress = progress;
     state.angle = Number(settings.restAngle) * (1 - progress);
+    pushTrace(now);
 
     if (state.releasing) {
       if (progress <= 0.004) {
@@ -416,13 +438,40 @@
       return;
     }
 
-    if (state.engaged && closingTravel < releaseRows && now - state.engagedAt > 500) {
+    // Release only after a real close, and only once the lid is back at rest.
+    // Comparing against the peak rather than against zero is what stops a
+    // mid-close reversal from throwing the effect away.
+    const closedProperly = state.maxPeak > full * 0.25;
+    if (closedProperly && state.peakTravel < full * settings.retraceReleaseFraction) {
       beginRelease('back at rest');
-    } else if (!state.engaged && now - state.armedAt > settings.idleReleaseMs) {
+    } else if (!closedProperly && now - state.lastMoveAt > settings.idleReleaseMs) {
       beginRelease('no lid movement');
     } else if (now - state.armedAt > settings.maxArmedMs) {
       beginRelease('armed for too long');
     }
+  }
+
+  /**
+   * A sample every 100 ms, kept for the run report. When tracking misbehaves on
+   * someone else's machine this is the only way to see what it actually did:
+   * the numbers behind a wrong-looking fold are invisible in a photograph.
+   */
+  function pushTrace(now) {
+    if (!state.trace || state.trace.length > 700) return;
+    const at = now - state.armedAt;
+    const last = state.trace[state.trace.length - 1];
+    if (last && at - last.t < 100) return;
+    state.trace.push({
+      t: Math.round(at),
+      travel: Number(state.travel.toFixed(1)),
+      peak: Number(state.peakTravel.toFixed(1)),
+      dir: state.direction,
+      progress: Number(state.progress.toFixed(3)),
+      angle: Number(state.angle.toFixed(1)),
+      quality: Number(state.quality.toFixed(2)),
+      strips: state.usedStrips,
+      fps: Math.round(state.rate || 0),
+    });
   }
 
   /** Starts the ease back to flat, and turns the camera off straight away. */
@@ -470,7 +519,14 @@
         mode: state.mode,
         engaged: state.engaged,
         peakTravel: state.peakTravel,
+        maxPeak: state.maxPeak,
+        direction: state.direction,
+        quality: state.quality,
+        strips: state.usedStrips,
+        fps: Math.round(state.rate || 0),
+        armedMs: Math.round(performance.now() - state.armedAt),
         reason: state.releaseReason,
+        trace: state.trace,
       };
       const closing = tracker;
       state = null;
@@ -557,6 +613,15 @@
       // from the first real movement, because it depends on the hardware.
       direction: 1,
       peakMagnitude: 0,
+      // The furthest the lid has been closed this run, which is what the picture
+      // follows. Ratcheted so noise and mid-close reversals cannot wind it back.
+      peakTravel: 0,
+      maxPeak: 0,
+      retraceAt: 0,
+      lastIdleTravel: 0,
+      lastMoveAt: performance.now(),
+      rate: 0,
+      trace: [],
       quality: 0,
       usedStrips: 0,
       engaged: false,
