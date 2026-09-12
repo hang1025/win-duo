@@ -18,10 +18,9 @@ const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
-const { iconIco } = require('../src/main/icon');
+const { writeIco, TARGET: ICON } = require('./make-ico');
 
 const ROOT = path.join(__dirname, '..');
-const ICON = path.join(ROOT, 'assets', 'win-duo.ico');
 const ELECTRON = path.join(ROOT, 'node_modules', 'electron', 'dist', 'electron.exe');
 
 function main() {
@@ -34,9 +33,7 @@ function main() {
     process.exit(1);
   }
 
-  fs.mkdirSync(path.dirname(ICON), { recursive: true });
-  fs.writeFileSync(ICON, iconIco());
-  console.log(`[win-duo] wrote ${ICON}`);
+  console.log(`[win-duo] wrote ${writeIco()}`);
 
   const desktop = path.join(os.homedir(), 'Desktop');
   if (!fs.existsSync(desktop)) {

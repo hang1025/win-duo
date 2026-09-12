@@ -2,27 +2,27 @@
   "name": "win-duo",
   "productName": "Win Duo",
   "version": "0.1.0",
-  "description": "Bring the iPhone Duo fold-open perspective effect to any Windows laptop. No hinge sensor required.",
+  "description": "合盖时让屏幕内容像 iPhone Duo 那样折起来，而且是跟着你真实的手走的。A Windows port of the iPhone Duo fold effect.",
   "main": "src/main/index.js",
   "type": "commonjs",
   "scripts": {
     "start": "electron .",
     "shortcut": "node tools/install-desktop-icon.js",
+    "ico": "node tools/make-ico.js",
     "selftest": "electron . --selftest",
     "selftest:real": "electron . --selftest --real",
     "verify": "electron . --verify",
     "verify:camera": "electron . --verify-camera",
-    "shot:fold": "electron . --shot-fold",
     "diagnose:cover": "electron . --diagnose-cover",
+    "shot:fold": "electron . --shot-fold",
     "timing": "electron . --timing",
     "check:settings": "electron . --check-settings",
     "bench": "electron tools/bench-capture.js",
-    "diagnose": "electron tools/diagnose-overlay.js",
-    "icons": "electron tools/make-icon.js",
     "docs:image": "electron tools/make-docs-image.js",
     "recon": "electron tools/lid-recon/main.js",
     "recon:selftest": "electron tools/lid-recon/main.js --camera-selftest",
-    "dist": "electron-builder --win"
+    "dist": "node tools/make-ico.js && electron-builder --win --x64",
+    "pack:share": "node tools/make-share-package.js"
   },
   "keywords": [
     "iphone-duo",
@@ -32,25 +32,39 @@
     "webgl",
     "electron",
     "windows",
+    "laptop",
     "lid"
   ],
-  "license": "MIT",
+  "license": "Apache-2.0",
+  "author": "Win Duo contributors",
   "devDependencies": {
-    "electron": "^44.0.0"
+    "electron": "^44.0.0",
+    "electron-builder": "^26.15.3"
   },
   "build": {
     "appId": "dev.winduo.app",
     "productName": "Win Duo",
+    "directories": {
+      "output": "dist"
+    },
     "files": [
       "src/**/*",
-      "assets/**/*",
       "package.json"
     ],
     "win": {
+      "icon": "assets/win-duo.ico",
       "target": [
-        "nsis",
-        "portable"
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
       ]
+    },
+    "portable": {
+      "artifactName": "WinDuo-Portable-${version}.exe",
+      "requestExecutionLevel": "user"
     }
   }
 }

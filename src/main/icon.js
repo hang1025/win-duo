@@ -173,4 +173,4 @@ function appIconPng() {
   return iconPng(256);
 }
 
-module.exports = { iconPng, iconIco, trayIconDataUrl, appIconPng, encodePng };
+module.exports = { iconPng, iconIco, trayIconDataUrl, appIconPng };

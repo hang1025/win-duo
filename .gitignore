@@ -1,12 +1,19 @@
 node_modules/
 dist/
-out/
+release/
+
+# Generated from code by `npm run dist` and `npm run shortcut`: the repository
+# carries no binary assets.
+assets/win-duo.ico
 
 # Self test dumps. Regenerate with `npm run selftest`.
 selftest-output/
 
 # Lid recon recordings.
 lid-recon-output/
+
+# Packaged builds shared outside the repo.
+share/
 
 # Electron build leftovers
 *.log

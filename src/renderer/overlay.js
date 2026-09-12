@@ -423,7 +423,6 @@
       state.engagedAt = now;
       state.phase = 'tracking';
       hideHint();
-      setInteractive(true);
     }
 
     // The travel maps onto the angle the lid is at, and the fold stops at
@@ -493,15 +492,6 @@
     }
   }
 
-  /**
-   * Whether the overlay takes mouse input. It never does: clicks pass through to
-   * the desktop, which is what Mac Duo does too, and the run is ended with the
-   * exit key instead.
-   */
-  function setInteractive() {
-    // Intentionally a no-op now that the exit is a key. Kept as a named place
-    // for the decision rather than scattering the reasoning across call sites.
-  }
 
   /**
    * A sample every 100 ms, kept for the run report. When tracking misbehaves on
@@ -530,7 +520,6 @@
   function beginRelease(reason) {
     state.releasing = true;
     state.releaseReason = reason;
-    setInteractive(false);
     if (tracker) tracker.close();
     if (window.winDuoBridge && window.winDuoBridge.mark) {
       window.winDuoBridge.mark(`release:${reason}`);
@@ -679,12 +668,11 @@
       direction: 1,
       peakMagnitude: 0,
       // The furthest the lid has been closed this run, which is what the picture
-      // follows. Ratcheted so noise and mid-close reversals cannot wind it back.
+      // follows. Never wound back by noise, and followed down only through a lag.
       peakTravel: 0,
       maxPeak: 0,
       lastIdleTravel: 0,
       lastMoveAt: performance.now(),
-      interactive: false,
       rate: 0,
       trace: [],
       quality: 0,
