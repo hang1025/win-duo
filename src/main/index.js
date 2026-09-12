@@ -29,6 +29,8 @@ const IS_VERIFY = ARGS.includes('--verify');
 const IS_VERIFY_CAMERA = ARGS.includes('--verify-camera');
 const IS_TIMING = ARGS.includes('--timing');
 const IS_CHECK_SETTINGS = ARGS.includes('--check-settings');
+const IS_SHOT_FOLD = ARGS.includes('--shot-fold');
+const IS_DIAGNOSE_COVER = ARGS.includes('--diagnose-cover');
 
 /** A run that never reports back would block every later one. */
 const RUN_TIMEOUT_MS = 15000;
@@ -408,6 +410,30 @@ async function onReady() {
     return;
   }
 
+  if (IS_DIAGNOSE_COVER) {
+    const { diagnoseCover } = require('./diagnose-cover');
+    registerIpc();
+    try {
+      exitAfterFlush(await diagnoseCover({ overlay, wait }));
+    } catch (error) {
+      console.error('[win-duo] coverage diagnosis failed:', error);
+      exitAfterFlush(1);
+    }
+    return;
+  }
+
+  if (IS_SHOT_FOLD) {
+    const { shotFold } = require('./shot-fold');
+    registerIpc();
+    try {
+      exitAfterFlush(await shotFold({ trigger, overlay, wait, prefs }));
+    } catch (error) {
+      console.error('[win-duo] screen capture failed:', error);
+      exitAfterFlush(1);
+    }
+    return;
+  }
+
   if (IS_VERIFY_CAMERA) {
     const { verifyCameraTracking } = require('./verify-camera');
     registerIpc();
@@ -479,7 +505,7 @@ async function onReady() {
  * looks like the checks passed when they never ran at all.
  */
 const IS_CHECK = IS_SELFTEST || IS_VERIFY || IS_VERIFY_CAMERA || IS_TIMING
-  || IS_CHECK_SETTINGS || ARGS.includes('--shot-settings');
+  || IS_CHECK_SETTINGS || IS_SHOT_FOLD || IS_DIAGNOSE_COVER || ARGS.includes('--shot-settings');
 
 if (!IS_CHECK && !app.requestSingleInstanceLock()) {
   app.quit();

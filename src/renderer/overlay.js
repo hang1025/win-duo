@@ -276,6 +276,9 @@
     });
     const inverse = NS.invert3(NS.rectToQuad(state.screenWidth, state.screenHeight, corners));
     if (!inverse) return;
+    // Kept so the probe below can answer "what does the shader do at this
+    // screen point" without guessing from a photograph.
+    state.lastInverse = inverse;
 
     // Only the blur and the dimming saturate: the geometry takes the angle
     // itself, so the picture keeps moving all the way to the shut angle.
@@ -609,6 +612,7 @@
       spring: new NS.Spring(payload.openAngle, settings.springFrequency),
       // Live tracking state.
       travel: 0,
+      lastInverse: null,
       // +1 or -1: which sign of tracked travel means the lid is closing. Latched
       // from the first real movement, because it depends on the hardware.
       direction: 1,
@@ -664,6 +668,7 @@
       // lets a harness close the lid with no camera and no hand, which is the
       // only way to test the live path automatically.
       window.__winDuoTrack = {
+        get offset() { return local.offset; },
         step(pixels) { local.offset += pixels; return local.offset; },
         reset() { local.reset(); },
       };
@@ -715,6 +720,41 @@
       },
     };
   }
+
+  /**
+   * Reports what the shader does at a given screen point: whether the picture
+   * covers it, and where in the picture it lands. `covered: false` means the
+   * shader paints black there - which is correct - but anything that reaches the
+   * screen uncovered instead is a leak.
+   *
+   * `yFromBottom` is in points, measured up from the bottom edge of the screen,
+   * and `x` across it, so the numbers line up with the geometry.
+   */
+  window.__winDuoProbe = (x, yFromBottom) => {
+    if (!state || !state.lastInverse) return null;
+    const m = state.lastInverse;
+    const sx = x;
+    const sy = yFromBottom;
+    const px = m[0] * sx + m[3] * sy + m[6];
+    const py = m[1] * sx + m[4] * sy + m[7];
+    const pw = m[2] * sx + m[5] * sy + m[8];
+    if (Math.abs(pw) < 1e-9) return { degenerate: true };
+    const picturePoint = [px / pw, py / pw];
+    const padding = state.paddingPoints;
+    const unit = [
+      (picturePoint[0] + padding) / (state.screenWidth + 2 * padding),
+      (picturePoint[1] + padding) / (state.screenHeight + 2 * padding),
+    ];
+    return {
+      angle: Number(state.angle.toFixed(2)),
+      progress: Number(state.progress.toFixed(3)),
+      screen: [Math.round(sx), Math.round(sy)],
+      screenHeight: state.screenHeight,
+      picturePoint: picturePoint.map((v) => Number(v.toFixed(1))),
+      unit: unit.map((v) => Number(v.toFixed(4))),
+      covered: unit[0] >= 0 && unit[0] <= 1 && unit[1] >= 0 && unit[1] <= 1,
+    };
+  };
 
   if (window.winDuoBridge) {
     window.winDuoBridge.onPlay(play);

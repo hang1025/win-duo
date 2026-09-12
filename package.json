@@ -12,6 +12,8 @@
     "selftest:real": "electron . --selftest --real",
     "verify": "electron . --verify",
     "verify:camera": "electron . --verify-camera",
+    "shot:fold": "electron . --shot-fold",
+    "diagnose:cover": "electron . --diagnose-cover",
     "timing": "electron . --timing",
     "check:settings": "electron . --check-settings",
     "bench": "electron tools/bench-capture.js",

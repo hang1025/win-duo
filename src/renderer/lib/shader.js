@@ -21,6 +21,13 @@ window.WinDuo = window.WinDuo || {};
    *    in linear light and `pow(1 - maxDim * fade, 2.2)` cancels back out to a
    *    plain scale of the *encoded* value. Here the texture is never decoded, so
    *    the encoded-space factor is the whole story.
+   *
+   * One thing that is easy to get wrong here, and was: everything outside the
+   * picture must be OPAQUE BLACK at full opacity, not transparent. The window is
+   * transparent so that it can fade, and the fold contracts the picture away
+   * from the edges of the screen - so a transparent "outside" lets the untouched
+   * desktop show through the gaps, sharp and un-warped, which reads as the
+   * effect leaking its own wallpaper back at you.
    */
   const FRAGMENT = `#version 300 es
 precision highp float;
@@ -51,12 +58,13 @@ void main() {
   vec2 screenPoint = gl_FragCoord.xy / uPixelScale;
 
   vec3 mapped = uScreenToPicture * vec3(screenPoint, 1.0);
-  if (abs(mapped.z) < 1e-6) { fragColor = vec4(0.0); return; }
+  if (abs(mapped.z) < 1e-6) { fragColor = vec4(0.0, 0.0, 0.0, uOpacity); return; }
   vec2 picturePoint = mapped.xy / mapped.z;
 
   vec2 unit = (picturePoint - uPaddedOrigin) / uPaddedSize;
   if (unit.x < 0.0 || unit.x > 1.0 || unit.y < 0.0 || unit.y > 1.0) {
-    fragColor = vec4(0.0);
+    // Opaque black, not transparent: see the note above the shader.
+    fragColor = vec4(0.0, 0.0, 0.0, uOpacity);
     return;
   }
   vec2 texCoord = vec2(unit.x, 1.0 - unit.y);

@@ -74,16 +74,18 @@ const DEFAULTS = {
   // hinge, screen height 21.5 cm. Mac Duo ships 6, which assumes a much
   // stronger viewing distance than a laptop on a desk ever has.
   viewingDistance: 3,
-  // Gaussian blur radius at full effect, in points. Lower than Mac Duo's 135
-  // because the stronger perspective above already carries most of the motion.
-  maxBlurRadius: 95,
+  // Gaussian blur radius at full effect, in points. Much lower than Mac Duo's
+  // 135: the stronger perspective already carries the motion, and heavy blur
+  // trades the fold away for a smear. Lower still if you want the content to
+  // stay readable right to the end.
+  maxBlurRadius: 45,
   // Blur at the hinge edge as a fraction of the blur at the far edge. 0 leaves
   // the hinge edge sharp, 1 blurs the picture evenly.
   blurEvenness: 0,
-  // Black overlay opacity where the blur is at full strength, 0...1. Not 1:
-  // fully black at the far edge makes the picture vanish while the panel is
-  // still readable, which throws away the last third of the visible window.
-  maxDim: 0.85,
+  // Black overlay opacity where the blur is at full strength, 0...1. Well short
+  // of 1: going fully black at the far edge makes the picture vanish while the
+  // panel is still readable, throwing away the last third of the window.
+  maxDim: 0.55,
   // Height at which the dimming reaches full strength, as a fraction of the
   // screen height, measured from the hinge edge.
   dimReach: 0.5,

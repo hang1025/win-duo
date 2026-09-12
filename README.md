@@ -209,8 +209,8 @@ worth touching first:
 | `blurSpan` | 40° | Degrees of lid travel from the trigger angle to full blur. |
 | `viewingDistance` | 3× screen height | Eye distance. Lower is a stronger perspective. **3 is what a seated user at a laptop flat on a desk actually measures** — eyes about 60 cm from the hinge, screen height 21.5 cm. Mac Duo ships 6, which is much flatter than a laptop on a desk ever is. |
 | `recession` | 1 | Degrees the picture turns away per degree of lid travel. |
-| `maxBlurRadius` | 95 px | Blur radius at full strength. |
-| `maxDim` | 0.85 | How black the far edge goes. Not 1: going fully black makes the picture vanish while the panel is still readable, throwing away the last third of the window. |
+| `maxBlurRadius` | 45 px | Blur radius at full strength. Far lower than Mac Duo's 135: the stronger perspective already carries the motion, and heavy blur trades the fold away for a smear. |
+| `maxDim` | 0.55 | How black the far edge goes. Well short of 1: going fully black makes the picture vanish while the panel is still readable, throwing away the last third of the window. |
 | `blurEvenness` | 0 | Blur at the hinge edge as a fraction of the far edge. |
 | `showAngleReadout` | on | Draws the tracked angle, the travel and the tracker's confidence in the corner. |
 
@@ -260,6 +260,19 @@ Both of these have already earned their keep. `recon:selftest` caught the tracke
 known displacement with the **wrong sign** — which would have looked correct right up until it
 was wired into the effect. `verify-camera` caught the fold never happening at all, because the
 direction of travel had been assumed rather than latched.
+
+Two more exist because numbers were not enough:
+
+```sh
+npm run shot:fold         # grabs the real screen at six held fold levels
+npm run diagnose:cover    # paints the overlay solid red and checks it covers the screen
+```
+
+`shot:fold` tests the picture rather than a property. A fold that looks wrong — or one that
+lets the untouched desktop show through where the picture has contracted away from the edge of
+the screen — passes every numeric check. Reading the shader's own answer back at chosen screen
+points is what pinned that one down: at 73°, the picture's far edge sits about 80 points below
+the top of the screen, and that strip was being left transparent instead of black.
 
 Measured on a 2560×1600 laptop at 150% scaling:
 
