@@ -3,30 +3,34 @@
 > 合盖的时候，屏幕上的画面会像 **iPhone Duo** 那样折起来、变模糊、暗下去——
 > 而且是**跟着你真实的手**一起动的。你合到哪，它折到哪；你停住，它停住；你开盖，它展平回来。
 
-这是 macOS 上 [Mac Duo](https://github.com/sumimakito/Mac-Duo)（作者 Makito）的 **Windows 移植版**。
-MacBook 有专门的合盖角度传感器，Windows 笔记本没有，所以这里改用**摄像头**来推算角度。
-
 ![四个角度：平放、以及逐渐折叠的三个阶段](docs/fold-progression.png)
-
-**目录**：[给不写代码的人](#给不写代码的人) · [常见问题](#常见问题) · [想调效果](#想调效果) · [给写代码的人](#给写代码的人) · [开发过程](docs/BUILD-LOG.md) · [English](#english)
 
 ---
 
-## 给不写代码的人
+# ⬇️ 下载
 
-### 三步就能用
+| 下载方式 | 链接 |
+|---|---|
+| **百度网盘**（国内推荐） | **[WinDuo-0.1.0.zip](https://pan.baidu.com/s/请替换成你的分享链接)**　提取码：`请替换` |
+| **GitHub Releases** | [最新版](../../releases/latest)（不用登录，但国内可能慢） |
 
-**第一步：双击 `WinDuo-Portable-x.x.x.exe`**
+下载下来是一个压缩包，**解压后双击里面的 `WinDuo-Portable-0.1.0.exe`** 就能用。
+不需要安装，不需要管理员权限，不改系统文件——它是一个绿色程序，不想要了直接删掉就行。
+
+---
+
+# 三步就能用
+
+**第一步：双击 `WinDuo-Portable-0.1.0.exe`**
 
 - 如果 Windows 弹出蓝色的「Windows 已保护你的电脑」，点 **更多信息** → **仍要运行**。
-  这是因为程序没买数字签名，不代表它有病毒。
+  这是因为程序没买数字签名（一年几百到几千块），**不代表它有病毒**。
 - 双击后**不会出现窗口**。它待在右下角任务栏的托盘里——可能要点一下那个向上的小箭头才看得到。
   图标是一个蓝色的折叠屏。
-- 不需要安装，不需要管理员权限，不改系统文件。不想要了直接删掉就行。
 
 **第二步：按 `Ctrl + Alt + D`**
 
-屏幕底部会出现一个小提示：**已待命 · 慢慢合盖**。这时候摄像头指示灯会亮。
+屏幕底部会出现一个小提示：**已待命 · 慢慢合盖**。这时候摄像头指示灯会亮起来。
 
 **第三步：慢慢合盖**
 
@@ -35,14 +39,38 @@ MacBook 有专门的合盖角度传感器，Windows 笔记本没有，所以这�
 - 想中途结束：按 **`Esc`**
 - 想退出程序：右键点托盘图标 → **退出**
 
-### 用之前请改一个系统设置（很重要）
+---
 
-Windows 默认在你合盖的瞬间就让电脑睡眠，那样效果根本来不及看见。
+# ⚠️ 用之前请先改一个系统设置
+
+Windows 默认在你合盖的**瞬间**就让电脑睡眠，那样效果根本来不及看见。
 
 > **控制面板 → 电源选项 → 选择关闭盖子的功能**
 > 把「关闭盖子时」的**两个下拉框都改成「不采取任何操作」**
 
 改完之后合盖时屏幕会一直亮着，效果才看得见。
+
+---
+
+<details>
+<summary><b>它是什么 / 为什么需要摄像头？（点开看）</b></summary>
+
+这是 macOS 上 [Mac Duo](https://github.com/sumimakito/Mac-Duo)（作者 Makito）的 **Windows 移植版**。
+
+MacBook 有专门的合盖角度传感器，所以它的效果能严丝合缝跟着你的手走。
+**普通 Windows 笔记本没有这个传感器**，所以这里改用**摄像头**来推算角度：
+
+> 每台笔记本的摄像头都是刚性固定在盖子上的。盖子转多少度，摄像头就转多少度，
+> 画面里的场景就会整体平移——这个关系是几何必然，跟耳机、网线、房间光线通通无关。
+
+摄像头指示灯**只在效果运行期间亮**（从按 `Ctrl+Alt+D` 到按 `Esc`）。
+它在本地实时算一个数字来判断角度，**画面一帧都不保存、不缓存、不上传**。
+
+</details>
+
+---
+
+**目录**：[常见问题](#常见问题) · [想调效果](#想调效果) · [给写代码的人](#给写代码的人) · [开发过程](docs/BUILD-LOG.md) · [English](#english)
 
 ---
 
@@ -107,7 +135,7 @@ Windows 默认在你合盖的瞬间就让电脑睡眠，那样效果根本来不
 环境要求：Windows 10 2004 及以上、Node 18+、一个摄像头、任意支持 WebGL2 的显卡。
 
 ```sh
-git clone https://github.com/<you>/win-duo.git
+git clone https://github.com/hang1025/win-duo.git
 cd win-duo
 npm install
 npm start
@@ -294,10 +322,16 @@ Close the lid and the picture on screen tilts, blurs and darkens in step with yo
 and it holds; open and it unfolds. It works by tracking the lid through the built-in webcam,
 because no ordinary Windows laptop has a hinge sensor.
 
-**Quick start (no coding):** run `WinDuo-Portable-<version>.exe`, press `Ctrl+Alt+D`, close the
-lid slowly. `Esc` ends a run. Set *Control Panel → Power Options → Choose what closing the lid
-does* to **Do nothing** first, or the machine sleeps before you see anything. There is a Chinese
-walkthrough with troubleshooting at the top of this file.
+**Download.** [Release assets](../../releases/latest) hold a single portable `.exe`, and a `.zip`
+of the same executable with a Chinese walkthrough beside it. Nothing to install, no admin rights,
+nothing added to the system.
+
+**Quick start:** run `WinDuo-Portable-<version>.exe`, press `Ctrl+Alt+D`, close the lid slowly.
+`Esc` ends a run. Set *Control Panel → Power Options → Choose what closing the lid does* to
+**Do nothing** first, or the machine sleeps before you see anything. Windows shows "Windows
+protected your PC" the first time — click **More info → Run anyway**, which is only because the
+binary is not code signed. The Chinese section at the top of this file has the full walkthrough
+and troubleshooting.
 
 **From source:**
 

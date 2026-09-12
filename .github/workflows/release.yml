@@ -1,0 +1,58 @@
+name: release
+
+# Push a tag and this publishes a release with the portable exe and the zip that
+# gets shared, so neither has to be built or uploaded by hand.
+#
+#   git tag v0.1.0
+#   git push origin v0.1.0
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install
+        run: npm install --no-audit --no-fund
+
+      # Parsing everything first: a syntax error should fail before a four minute
+      # packaging run does.
+      - name: Parse every source file
+        shell: bash
+        run: find src tools -name '*.js' -print0 | xargs -0 -n1 node --check
+
+      - name: Package the portable exe
+        run: npm run dist
+
+      - name: Assemble the share package
+        run: npm run pack:share
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/WinDuo-Portable-*.exe
+            share/WinDuo-*.zip
+          body: |
+            下载 `WinDuo-Portable-*.exe` 双击即可，或下载 `WinDuo-*.zip`（里面是同一个 exe 加一份中文使用说明）。
+
+            Double click `WinDuo-Portable-*.exe`. The `.zip` is the same executable with a
+            Chinese walkthrough next to it.
+
+            Windows 会提示「已保护你的电脑」，点 **更多信息 → 仍要运行**：程序没有购买数字签名。
+            Before the first run, set *Power Options → Choose what closing the lid does* to
+            **Do nothing**, or the machine sleeps before the effect can be seen.
+          draft: false
+          prerelease: false
