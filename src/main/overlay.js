@@ -147,16 +147,12 @@ class Overlay {
   }
 
   /**
-   * Whether the overlay takes mouse input.
-   *
-   * It stays click-through while armed and waiting, so the desktop keeps
-   * working, and takes clicks once the picture is up so that a click can end
-   * the run. The trade is that the desktop underneath is not clickable while
-   * the fold is showing, which is the point: a click there means "stop".
+   * Asks the page to end the run, which eases the picture back to flat before
+   * fading out. Hide is done by the main process when the page reports back.
    */
-  setInteractive(on) {
+  requestExit() {
     if (!this.win || this.win.isDestroyed()) return;
-    this.win.setIgnoreMouseEvents(!on);
+    this.win.webContents.send('wd:exit');
   }
 
   sendSettings(settings) {

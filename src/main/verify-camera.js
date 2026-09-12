@@ -14,7 +14,9 @@
  *
  *   .\node_modules\.bin\electron.cmd . --verify-camera
  */
-async function verifyCameraTracking({ trigger, overlay, wait, isPlaying, prefs, getLastReport }) {
+async function verifyCameraTracking({
+  trigger, overlay, wait, isPlaying, prefs, getLastReport, registerExitKey,
+}) {
   const win = await overlay.ensure();
   const fullTravel = Number(prefs.values.fullTravel) || 170;
   const restAngle = Number(prefs.values.restAngle) || 105;
@@ -97,54 +99,55 @@ async function verifyCameraTracking({ trigger, overlay, wait, isPlaying, prefs, 
   }
   console.log('PASS: arming, tracking, the fold following the lid, the release and the report all worked.');
 
-  // --- clicking ends a run -------------------------------------------------
-  const clickRun = async (overrides, settleMs) => {
-    const started = Date.now();
+  // --- the exit key ends a run ---------------------------------------------
+  const exitRun = async (overrides, settleMs) => {
     await trigger(overrides);
     await wait(1000);
     await drive(20, 8);
     await wait(settleMs);
-    const beforeClick = await debug();
+    const beforeExit = await debug();
     if (settleMs > 0) {
-      console.log(`  after ${settleMs} ms of holding still: engaged=${beforeClick.state && beforeClick.state.engaged} releasing=${beforeClick.state && beforeClick.state.releasing} progress=${beforeClick.state && beforeClick.state.progress}`);
+      console.log(`  after ${settleMs} ms of holding still: engaged=${beforeExit.state && beforeExit.state.engaged} releasing=${beforeExit.state && beforeExit.state.releasing} progress=${beforeExit.state && beforeExit.state.progress}`);
     }
-    await win.webContents.executeJavaScript(
-      "document.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })), true",
-    );
-    const clickAt = Date.now();
+    // The same path the registered key takes: main asks the page to end the run.
+    // The key press itself cannot be synthesised, but everything downstream of
+    // it can, and the registration is reported separately.
+    overlay.requestExit();
+    const exitAt = Date.now();
     const deadline2 = Date.now() + 8000;
     while (isPlaying() && Date.now() < deadline2) await wait(15);
-    return { beforeClick, report: getLastReport(), latency: Date.now() - clickAt };
+    return { beforeExit, report: getLastReport(), latency: Date.now() - exitAt };
   };
 
-  console.log('--- a click should end a run on its own ---');
-  const clicked = await clickRun({ angleSource: 'camera', syntheticCamera: true }, 400);
-  console.log(`  reason=${clicked.report && clicked.report.reason}  hidden=${!win.isVisible()}  click to gone: ${clicked.latency} ms`);
-  if (!clicked.report || clicked.report.reason !== 'clicked') {
-    problems.push(`a click did not end the run (reason ${clicked.report && clicked.report.reason})`);
+  console.log(`exit key registered while a run is up: ${registerExitKey()}`);
+  console.log('--- Escape should end a run on its own ---');
+  const exited = await exitRun({ angleSource: 'camera', syntheticCamera: true }, 400);
+  console.log(`  reason=${exited.report && exited.report.reason}  hidden=${!win.isVisible()}  key to gone: ${exited.latency} ms`);
+  if (!exited.report || exited.report.reason !== 'escape') {
+    problems.push(`the exit key did not end the run (reason ${exited.report && exited.report.reason})`);
   }
   // The ease back to flat and the fade are serial, so this is the number that
-  // decides whether clicking feels like it did anything. It used to be around
-  // 700 ms.
-  if (clicked.latency > 450) problems.push(`clicking took ${clicked.latency} ms to clear the screen`);
+  // decides whether ending a run by hand feels like it did anything. It used to
+  // be around 700 ms.
+  if (exited.latency > 450) problems.push(`ending a run took ${exited.latency} ms to clear the screen`);
 
-  console.log('--- "only when I click" should not time out ---');
-  const held = await clickRun(
-    { angleSource: 'camera', syntheticCamera: true, releaseOn: 'click', idleReleaseMs: 1500 },
+  console.log('--- "only when I press Esc" should not time out ---');
+  const held = await exitRun(
+    { angleSource: 'camera', syntheticCamera: true, releaseOn: 'key', idleReleaseMs: 1500 },
     3200,
   );
-  const stillUp = held.beforeClick.state && held.beforeClick.state.engaged && !held.beforeClick.state.releasing;
+  const stillUp = held.beforeExit.state && held.beforeExit.state.engaged && !held.beforeExit.state.releasing;
   console.log(`  still up after 3.2 s against a 1.5 s idle timeout: ${stillUp}`);
-  if (!stillUp) problems.push('the run timed out even though it was set to end only on a click');
-  if (!held.report || held.report.reason !== 'clicked') {
-    problems.push(`the click after holding did not end the run (reason ${held.report && held.report.reason})`);
+  if (!stillUp) problems.push('the run timed out even though it was set to end only on the exit key');
+  if (!held.report || held.report.reason !== 'escape') {
+    problems.push(`the exit key after holding did not end the run (reason ${held.report && held.report.reason})`);
   }
 
   if (problems.length) {
     console.log(`FAIL: ${problems.join('; ')}`);
     return 1;
   }
-  console.log('PASS: and a click ends a run, in both release modes.');
+  console.log('PASS: and Escape ends a run, in both release modes.');
   return 0;
 }
 

@@ -26,6 +26,10 @@ class Preferences {
           this.values[key] = parsed[key];
         }
       }
+      // 'click' was the name of the hold-until-exit mode back when a mouse click
+      // ended a run. The exit is the Escape key now, so carry the old value over
+      // rather than silently dropping the user back to automatic.
+      if (this.values.releaseOn === 'click') this.values.releaseOn = 'key';
     } catch (error) {
       // First run, or a file someone edited by hand. Defaults are already in.
       if (error && error.code !== 'ENOENT') {

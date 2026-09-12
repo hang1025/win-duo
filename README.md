@@ -1,4 +1,4 @@
-# Win Duo
+﻿# Win Duo
 
 **The iPhone Duo fold effect, on any Windows laptop — following the real lid, with no hinge sensor.**
 
@@ -108,16 +108,20 @@ Then:
 5. **Let go.** When the lid is back at its resting angle the picture eases flat, fades out,
    and the camera light goes off.
 
-**A click anywhere ends a run immediately**, whichever ending is configured — while the
-picture is up the overlay takes mouse input instead of passing it through, so that a click
-means stop. Set `releaseOn` to `click` and a run never times out at all: it stays folded and
-the camera stays on until you click.
+**Escape ends a run immediately**, whichever ending is configured. The key is registered as a
+global shortcut only for the length of a run — a globally bound key swallows it everywhere, so
+leaving it registered would break Escape in every other application. It also cancels a run
+that was armed by accident, before the lid has moved. Clicks are not captured at all: they
+pass through to the desktop, as Mac Duo's do.
 
-Clicking clears the screen in about **280 ms**. The ease back to flat and the fade are
+Set `releaseOn` to `key` and a run never times out at all: it stays folded and the camera
+stays on until Escape is pressed.
+
+Ending a run clears the screen in about **280 ms**. The ease back to flat and the fade are
 serial, so the ease runs at its own, faster spring frequency: at the tracking frequency it
 alone takes about half a second, because a critically damped spring needs four or five time
-constants to settle, and that half second of nothing is exactly what made clicking feel
-unresponsive.
+constants to settle, and that half second of nothing is exactly what made ending a run by hand
+feel unresponsive.
 
 There is no angle at which the effect switches itself off. It ends when the lid comes back to
 rest, when nothing has moved for fifteen seconds after arming, or after five minutes as a cap
@@ -227,7 +231,7 @@ worth touching first:
 | `blurCurve` | 1 | Exponent on the closing travel for the blur. Above 1 the blur arrives late and then rushes. |
 | `blurEvenness` | 0 | Blur at the hinge edge as a fraction of the far edge. |
 | `neutralBand` | 0° | Degrees either side of the rest angle where the picture stays completely flat, so the lid can move within a working range with no blur at all. |
-| `releaseOn` | `auto` | `auto` ends the run when the lid comes back to rest, or after an idle timeout. `click` never times out and keeps the camera on until you click. Clicking always ends a run, either way. |
+| `releaseOn` | `auto` | `auto` ends the run when the lid comes back to rest, or after an idle timeout. `key` never times out and keeps the camera on until Escape. Escape always ends a run, either way. |
 | `showAngleReadout` | on | Draws the tracked angle, the travel and the tracker's confidence in the corner. |
 
 The defaults are tuned for a laptop **flat on a desk**, which is where the usable window is
@@ -447,9 +451,11 @@ npm start
 4. **开盖。** 它反向展平回去。
 5. **松手。** 盖子回到静止角后，画面缓动归平、淡出，摄像头指示灯熄灭。
 
-**鼠标单击可以随时立刻结束一次运行**，无论上面配的是哪种结束方式——画面出现后覆盖层会接管鼠标输入而不是穿透过去，所以点击就意味着"停"。把 `releaseOn` 设成 `click`，运行就完全不超时：画面一直折着、摄像头一直开着，直到你点击。
+**按 Esc 可以随时立刻结束一次运行**，无论上面配的是哪种结束方式。这个键只在**一次运行期间**被注册为全局快捷键——全局绑定会把它从所有程序手里抢走，一直挂着会让其他软件的 Esc 失效。它同时也能取消一次误触发的待命（盖子还没动的时候）。点击不做任何拦截，**照常穿透到桌面**（Mac Duo 也是这样）。
 
-点击到画面消失约 **280 毫秒**。"缓动归平"和"淡出"是串联的，所以归平用了更快的弹簧频率：在跟踪频率下它单独就要花约半秒（临界阻尼弹簧需要四五个时间常数才能收敛），那半秒的"没反应"正是点击感觉很慢的原因。
+把 `releaseOn` 设成 `key`，运行就完全不超时：画面一直折着、摄像头一直开着，直到你按 Esc。
+
+从按键到画面消失约 **280 毫秒**。"缓动归平"和"淡出"是串联的，所以归平用了更快的弹簧频率：在跟踪频率下它单独就要花约半秒（临界阻尼弹簧需要四五个时间常数才能收敛），那半秒的"没反应"正是手动结束感觉很慢的原因。
 
 待命后 15 秒内没有任何动作，它会自动解除待命并把屏幕还给你。运行之外，摄像头指示灯永远不会亮。
 
@@ -531,7 +537,7 @@ colour.rgb *= (1.0 - uMaxDim * fade);   // fade 随高度上升，走 smoothstep
 | `blurCurve` | 1 | 模糊随合盖行程的曲线指数。大于 1 会让模糊来得晚、然后猛冲。 |
 | `blurEvenness` | 0 | 铰链一侧的模糊，相对远端满值的比例。 |
 | `neutralBand` | 0° | 静止角两侧这个度数范围内画面完全平整，让你在工作角度区间内活动时完全没有模糊。 |
-| `releaseOn` | `auto` | `auto`：盖子回位或超时结束。`click`：不超时，摄像头一直开着直到你点击。无论哪种，点击都能随时结束。 |
+| `releaseOn` | `auto` | `auto`：盖子回位或超时结束。`key`：不超时，摄像头一直开着直到你按 Esc。无论哪种，Esc 都能随时结束。 |
 | `showAngleReadout` | 开 | 在角落显示实时角度、行程和追踪置信度。 |
 
 默认参数是按**笔记本平放桌面**调的——那正是可视窗口最窄的情况。按几何算下来（眼睛在桌面上方约 45cm、离铰链约 60cm、屏幕高 21.5cm）：屏幕在约 **105°** 时正对你的眼睛，在约 **60–65°** 时开始看不清。所以效果必须在**这四十度之内**演完。这就是静止角取 105（而不是 Mac Duo 的 90）、模糊在 65° 收尾（而不是 30°）的原因。

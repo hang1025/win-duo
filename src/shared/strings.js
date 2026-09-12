@@ -50,8 +50,8 @@
       releaseOn: {
         label: 'Ending the run',
         auto: 'When the lid comes back to rest',
-        click: 'Only when I click',
-        hint: 'On "only when I click" the run never times out and the camera stays on until then. Clicking always ends a run, whichever is set.',
+        key: 'Only when I press Esc',
+        hint: 'On "only when I press Esc" the run never times out and the camera stays on until then. Escape always ends a run, whichever is set, and it is only bound while a run is up.',
       },
       showAngleReadout: { label: 'Show the tracked angle on screen' },
       restAngle: {
@@ -149,8 +149,8 @@
       releaseOn: {
         label: '结束方式',
         auto: '盖子回位时自动结束',
-        click: '只有我点击才结束',
-        hint: '选「只有我点击才结束」时，不会超时、摄像头会一直开着直到你点击。无论选哪个，点击都能随时结束。',
+        key: '只有我按 Esc 才结束',
+        hint: '选「只有我按 Esc 才结束」时，不会超时、摄像头会一直开着直到你按 Esc。无论选哪个，按 Esc 都能随时结束；而且 Esc 只在效果运行期间被接管，平时不受影响。',
       },
       showAngleReadout: { label: '在屏幕上显示实时角度' },
       restAngle: {

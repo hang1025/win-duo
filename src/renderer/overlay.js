@@ -223,7 +223,9 @@
     }
     readoutElement.style.opacity = '1';
     if (state.mode === 'camera') {
-      const gate = state.engaged ? (state.settings.releaseOn === 'click' ? '点击退出' : '点击或松手退出') : '待命';
+      const gate = state.engaged
+        ? (state.settings.releaseOn === 'auto' ? '按 Esc 退出' : '按 Esc 退出 · 不自动结束')
+        : '待命 · 按 Esc 取消';
       readoutElement.textContent = [
         `角度 ${state.angle.toFixed(1)}°`,
         `行程 ${state.peakTravel.toFixed(0)}/${Number(state.settings.fullTravel).toFixed(0)}`,
@@ -464,9 +466,10 @@
       return;
     }
 
-    // 'click' means the run stays up until the mouse is clicked, with no idle
-    // timeout and no cap, so the camera stays on until then.
-    if (settings.releaseOn === 'click') return;
+    // 'auto' is the only mode that ends itself. Anything else - 'key', or the
+    // 'click' an older settings file may still hold - means the run stays up,
+    // with the camera on, until the exit key is pressed.
+    if (settings.releaseOn !== 'auto') return;
 
     // Release only after a real close, and only once the lid is back at rest.
     const closedProperly = state.maxPeak > full * 0.25;
@@ -491,14 +494,13 @@
   }
 
   /**
-   * Whether the overlay takes mouse input. While the effect is armed and waiting
-   * it stays click-through so the desktop keeps working; once the picture is up
-   * it takes clicks, because a click is how the run is ended by hand.
+   * Whether the overlay takes mouse input. It never does: clicks pass through to
+   * the desktop, which is what Mac Duo does too, and the run is ended with the
+   * exit key instead.
    */
-  function setInteractive(on) {
-    if (!window.winDuoBridge || !window.winDuoBridge.setInteractive) return;
-    if (state) state.interactive = on;
-    window.winDuoBridge.setInteractive(on);
+  function setInteractive() {
+    // Intentionally a no-op now that the exit is a key. Kept as a named place
+    // for the decision rather than scattering the reasoning across call sites.
   }
 
   /**
@@ -554,7 +556,7 @@
     const targetOpacity = state.fadingOut || waiting ? 0 : 1;
     // A click is the case where waiting is least welcome, so it gets the short
     // fade.
-    const fadeOut = state.releaseReason === 'clicked'
+    const fadeOut = state.releaseReason === 'escape'
       ? (Number(state.settings.clickFadeOut) || 0.12)
       : state.settings.fadeOut;
     const duration = state.fadingOut ? fadeOut : state.settings.fadeIn;
@@ -819,21 +821,15 @@
     window.winDuoBridge.onSettings((settings) => {
       if (state) state.settings = settings;
     });
+    // Escape ends the run. It is registered globally by the main process and
+    // only while a run is up, so it also cancels a run that was armed by
+    // accident before the lid ever moved.
+    if (window.winDuoBridge.onExit) {
+      window.winDuoBridge.onExit(() => {
+        if (!state || state.releasing) return;
+        beginRelease('escape');
+      });
+    }
     if (selfTest) window.winDuoBridge.onSelftestPayload((payload) => window.__winDuoSelftest.store(payload));
   }
-
-  // A click ends the run by hand rather than waiting for the lid to come back.
-  // While armed and waiting the overlay is click-through and never sees this;
-  // once the picture is up it takes input, which is the trade that makes the
-  // click possible at all.
-  //
-  // Both events are bound: `pointerdown` covers pointers that are not a mouse,
-  // and `mousedown` is the one that fires first on Windows.
-  const endOnClick = () => {
-    if (!state || state.releasing || !state.engaged) return;
-    beginRelease('clicked');
-  };
-  document.addEventListener('mousedown', endOnClick);
-  document.addEventListener('pointerdown', endOnClick);
-  document.addEventListener('contextmenu', (event) => event.preventDefault());
 })();

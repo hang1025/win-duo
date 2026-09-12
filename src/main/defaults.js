@@ -51,8 +51,9 @@ const DEFAULTS = {
   // so the lid can sit at a working angle without any blur at all.
   neutralBand: 0,
   // 'auto' ends the run when the lid comes back to rest or after the idle
-  // timeout. 'click' keeps it up until the mouse is clicked, and turns the idle
-  // and stuck caps off entirely - the camera stays on until then.
+  // timeout. 'key' keeps it up until Escape is pressed, and turns the idle and
+  // stuck caps off entirely - the camera stays on until then. Escape always ends
+  // a run, either way.
   releaseOn: 'auto',
   // Armed with no lid movement for this long, or armed at all for this long,
   // and the camera goes back off.

@@ -122,6 +122,7 @@ async function trigger(overrides) {
       syntheticCamera: Boolean(settings.syntheticCamera),
     });
     mark('handed to the overlay');
+    registerExitKey();
   } catch (error) {
     playing = false;
     console.error('[win-duo] overlay failed:', error.message);
@@ -161,6 +162,7 @@ function saveLastRun(report) {
 function endRun(report) {
   playing = false;
   lastRunReport = report || null;
+  unregisterExitKey();
   if (runWatchdog) {
     clearTimeout(runWatchdog);
     runWatchdog = null;
@@ -212,6 +214,45 @@ function applyLoginItem(enabled) {
   app.setLoginItemSettings({ openAtLogin: enabled, args: [] });
 }
 
+/** The key that ends a run by hand. */
+const EXIT_KEY = 'Escape';
+let exitKeyRegistered = false;
+
+/**
+ * Registers Escape, but only for the length of a run.
+ *
+ * A global shortcut swallows the key everywhere, so leaving it registered would
+ * break Escape in every other application. Registering it around the run means
+ * it works exactly when the effect is up, which is the only time it is wanted,
+ * and it also cancels a run that was armed by accident before the lid moved.
+ */
+function registerExitKey() {
+  if (exitKeyRegistered) return true;
+  let ok = false;
+  try {
+    ok = globalShortcut.register(EXIT_KEY, () => {
+      if (overlay) overlay.requestExit();
+    });
+  } catch (error) {
+    ok = false;
+  }
+  exitKeyRegistered = ok;
+  if (!ok) {
+    console.warn(`[win-duo] could not register ${EXIT_KEY}; the lid coming back still ends a run`);
+  }
+  return ok;
+}
+
+function unregisterExitKey() {
+  if (!exitKeyRegistered) return;
+  try {
+    globalShortcut.unregister(EXIT_KEY);
+  } catch (error) {
+    // Already gone; nothing to do.
+  }
+  exitKeyRegistered = false;
+}
+
 function registerHotkey() {
   globalShortcut.unregisterAll();
   const accelerator = prefs.values.hotkey;
@@ -223,6 +264,8 @@ function registerHotkey() {
     ok = false;
   }
   if (!ok) console.warn(`[win-duo] could not register the hotkey ${accelerator}`);
+  // unregisterAll above took the exit key with it.
+  if (playing) registerExitKey();
   return ok;
 }
 
@@ -344,10 +387,6 @@ function registerIpc() {
 
   ipcMain.on('wd:overlay-finished', (_event, report) => { endRun(report); });
 
-  ipcMain.on('wd:interactive', (_event, on) => {
-    if (overlay) overlay.setInteractive(Boolean(on));
-  });
-
   ipcMain.on('wd:mark', (_event, name, at) => {
     if (process.env.WIN_DUO_DEBUG) {
       console.log(`[win-duo] +${String(at - runStartedAt).padStart(4)}ms  ${name}`);
@@ -452,6 +491,7 @@ async function onReady() {
         isPlaying: () => playing,
         prefs,
         getLastReport: () => lastRunReport,
+        registerExitKey,
       });
       process.exitCode = code;
       exitAfterFlush(code);
