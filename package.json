@@ -13,6 +13,7 @@
     "selftest:real": "electron . --selftest --real",
     "verify": "electron . --verify",
     "verify:camera": "electron . --verify-camera",
+    "verify:monitor": "electron . --verify-monitor",
     "diagnose:cover": "electron . --diagnose-cover",
     "shot:fold": "electron . --shot-fold",
     "timing": "electron . --timing",

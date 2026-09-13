@@ -22,6 +22,23 @@ contextBridge.exposeInMainWorld('winDuoBridge', {
   onExit: (callback) => ipcRenderer.on('wd:exit', () => callback()),
 
   /**
+   * The persistent monitor. `onMonitorStart` carries the camera and the
+   * relative trigger/re-arm angles; `onMonitorStop` closes the one stream;
+   * `onMonitorResume` is sent when the main process could not start a run and
+   * the monitor should keep watching.
+   */
+  onMonitorStart: (callback) => ipcRenderer.on('wd:monitor-start', (_event, config) => callback(config)),
+  onMonitorStop: (callback) => ipcRenderer.on('wd:monitor-stop', (_event, payload) => callback(payload || {})),
+  onMonitorResume: (callback) => ipcRenderer.on('wd:monitor-resume', (_event, payload) => callback(payload || {})),
+  /**
+   * The monitor saw the lid pass the relative trigger. The main process is the
+   * final gate and decides whether a run actually starts.
+   */
+  monitorCrossed: (info) => ipcRenderer.send('wd:monitor-crossed', info),
+  /** Whether monitoring actually started, so the tray can report the truth. */
+  monitorStatus: (status) => ipcRenderer.send('wd:monitor-status', status),
+
+  /**
    * Timing marks. `Date.now()` is the same clock in both processes, so the main
    * process can line these up against the moment the hotkey fired.
    */

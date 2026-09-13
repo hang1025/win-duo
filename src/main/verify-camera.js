@@ -21,17 +21,77 @@ async function verifyCameraTracking({
   const fullTravel = Number(prefs.values.fullTravel) || 170;
   const restAngle = Number(prefs.values.restAngle) || 105;
 
+  // The constraint helpers are pure, so strict selected-device constraints can
+  // be checked here with no camera and no hardware.
+  const helpers = await win.webContents.executeJavaScript(`(() => {
+    const api = window.WinDuo.lidTracker;
+    return {
+      hasHelpers: typeof api.videoConstraints === 'function' && typeof api.cameraAttempts === 'function',
+      empty: api.cameraAttempts(''),
+      exact: api.cameraAttempts('cam-bogus'),
+    };
+  })()`);
+
+  // A stream that opens but cannot start playing must not survive: the tracks
+  // have to stop and open() has to report false, so the overlay falls back to
+  // the sweep. The media APIs are stubbed for this one check, so no camera is
+  // touched.
+  const playFailure = await win.webContents.executeJavaScript(`(async () => {
+    const mediaProto = window.MediaDevices && MediaDevices.prototype;
+    if (!mediaProto || typeof mediaProto.getUserMedia !== 'function') return { skipped: true };
+    const originalGet = mediaProto.getUserMedia;
+    const originalPlay = HTMLMediaElement.prototype.play;
+    let stopped = 0;
+    const fakeStream = { getTracks: () => [{ stop: () => { stopped += 1; } }] };
+    mediaProto.getUserMedia = async () => fakeStream;
+    if (navigator.mediaDevices.getUserMedia !== mediaProto.getUserMedia) {
+      mediaProto.getUserMedia = originalGet;
+      return { skipped: true };
+    }
+    HTMLMediaElement.prototype.play = async () => { throw new Error('play blocked'); };
+    const tracker = new window.WinDuo.LidTracker({ deviceId: '' });
+    let opened = null;
+    let threw = false;
+    try {
+      opened = await tracker.open();
+    } catch (error) {
+      threw = true;
+    } finally {
+      mediaProto.getUserMedia = originalGet;
+      HTMLMediaElement.prototype.play = originalPlay;
+    }
+    return {
+      opened,
+      threw,
+      stopped,
+      available: tracker.available,
+      streamCleared: tracker.stream === null,
+      videoCleared: tracker.video === null,
+      hasNote: typeof tracker.note === 'string' && tracker.note.indexOf(': ') !== -1,
+    };
+  })()`);
+
   await wait(400);
   // Forced to 'auto' for this phase: the user is free to set 'click', which by
   // design never releases, and this phase is checking the release that happens
   // when the lid comes back on its own. The override is per run and is never
   // written back to their settings.
   console.log(`user releaseOn=${prefs.values.releaseOn}, this phase forces 'auto'`);
-  await trigger({ angleSource: 'camera', syntheticCamera: true, releaseOn: 'auto' });
+  // The bogus device id is the point: synthetic mode must ignore it rather than
+  // try to open a camera that does not exist.
+  await trigger({
+    angleSource: 'camera',
+    syntheticCamera: true,
+    releaseOn: 'auto',
+    cameraDeviceId: 'bogus-camera-id',
+  });
   await wait(1000);
 
   const debug = () => win.webContents.executeJavaScript('window.__winDuoDebug()');
   const armed = await debug();
+  // The hook only exists when the tracker took the synthetic branch, which is
+  // the deterministic proof that the device id was ignored.
+  const syntheticHook = await win.webContents.executeJavaScript('Boolean(window.__winDuoTrack)');
   console.log(`armed   fullTravel=${fullTravel} restAngle=${restAngle}`);
   console.log(`        ${JSON.stringify(armed.state)}`);
 
@@ -68,6 +128,42 @@ async function verifyCameraTracking({
   const problems = [];
   if (closedDrive !== 'ok' || openDrive !== 'ok') problems.push('the test hook was missing');
   if (!armed.state || armed.state.mode !== 'camera') problems.push('the run did not arm in camera mode');
+
+  // The pure constraint helpers: no saved device means one generic attempt;
+  // a saved device means one exact attempt, with the existing ideal dimensions
+  // and frame rate in both cases.
+  if (!helpers.hasHelpers) problems.push('the camera constraint helpers are missing');
+  const emptyAttempts = helpers.empty || [];
+  const exactAttempts = helpers.exact || [];
+  if (emptyAttempts.length !== 1 || emptyAttempts[0].deviceId) {
+    problems.push('an empty device id did not produce a single generic attempt');
+  }
+  if (exactAttempts.length !== 1) {
+    problems.push(`a saved device id produced ${exactAttempts.length} attempts, not 1`);
+  } else if (!exactAttempts[0].deviceId || exactAttempts[0].deviceId.exact !== 'cam-bogus') {
+    problems.push('the selected device did not use the exact saved camera');
+  }
+  for (const attempt of emptyAttempts.concat(exactAttempts)) {
+    if (!attempt.width || attempt.width.ideal !== 640) problems.push('the width constraint was lost');
+    if (!attempt.height || attempt.height.ideal !== 480) problems.push('the height constraint was lost');
+    if (!attempt.frameRate || attempt.frameRate.ideal !== 30) problems.push('the frame rate constraint was lost');
+  }
+  if (!syntheticHook) problems.push('synthetic mode did not ignore the bogus device id');
+
+  // The cleanup after a failed video.play(): tracks stopped, state cleared, and
+  // a false return rather than a thrown rejection.
+  if (playFailure && !playFailure.skipped) {
+    if (playFailure.threw || playFailure.opened !== false) {
+      problems.push('a rejected video.play() was not reported as a failed open');
+    }
+    if (playFailure.stopped !== 1) {
+      problems.push('a rejected video.play() left the stream tracks running');
+    }
+    if (playFailure.available || !playFailure.streamCleared || !playFailure.videoCleared) {
+      problems.push('a rejected video.play() did not clear the tracker stream');
+    }
+    if (!playFailure.hasNote) problems.push('a rejected video.play() did not set an error note');
+  }
   if (armed.state && armed.state.opacity > 0.1) problems.push('the picture was visible before the lid moved');
   if (!closing.state || !closing.state.engaged) problems.push('the lid movement was not detected');
   if (closing.state && !(closing.state.progress > 0.15)) problems.push(`closing only reached progress ${closing.state.progress}`);
@@ -149,6 +245,98 @@ async function verifyCameraTracking({
   if (!stillUp) problems.push('the run timed out even though it was set to end only on the exit key');
   if (!held.report || held.report.reason !== 'escape') {
     problems.push(`the exit key after holding did not end the run (reason ${held.report && held.report.reason})`);
+  }
+
+  // --- a run that ends while the camera is still opening --------------------
+  // getUserMedia is delayed with a stub, the run is ended, and only then is the
+  // stream handed back. The late result has to be closed instead of arming a run
+  // that is already gone. The media APIs are stubbed for this check only, so no
+  // real camera is opened.
+  {
+    const patched = await win.webContents.executeJavaScript(`(() => {
+      const mediaProto = window.MediaDevices && MediaDevices.prototype;
+      const streamProto = window.MediaStream && MediaStream.prototype;
+      if (!mediaProto || typeof mediaProto.getUserMedia !== 'function') return { skipped: true };
+      if (!streamProto || typeof streamProto.getTracks !== 'function') return { skipped: true };
+      const originalGet = mediaProto.getUserMedia;
+      const originalGetTracks = streamProto.getTracks;
+      const originalPlay = HTMLMediaElement.prototype.play;
+      const fakeGetTracks = () => [{ stop: () => { window.__winDuoCameraStops += 1; } }];
+      const fakePlay = async () => {};
+      window.__winDuoCameraStops = 0;
+      window.__winDuoGetUserMediaCalls = 0;
+      window.__winDuoResolveCamera = null;
+      window.__winDuoOriginalGet = originalGet;
+      window.__winDuoOriginalGetTracks = originalGetTracks;
+      window.__winDuoOriginalPlay = originalPlay;
+      mediaProto.getUserMedia = () => {
+        window.__winDuoGetUserMediaCalls += 1;
+        return new Promise((resolve) => {
+          window.__winDuoResolveCamera = () => resolve(new MediaStream());
+        });
+      };
+      streamProto.getTracks = fakeGetTracks;
+      HTMLMediaElement.prototype.play = fakePlay;
+      const applied = navigator.mediaDevices.getUserMedia === mediaProto.getUserMedia
+        && streamProto.getTracks === fakeGetTracks
+        && HTMLMediaElement.prototype.play === fakePlay;
+      if (!applied) {
+        mediaProto.getUserMedia = originalGet;
+        streamProto.getTracks = originalGetTracks;
+        HTMLMediaElement.prototype.play = originalPlay;
+        return { skipped: true };
+      }
+      return { skipped: false };
+    })()`);
+
+    if (patched && patched.skipped) {
+      console.log('delayed open: skipped (media APIs unavailable)');
+    } else {
+      try {
+        const idleDeadline = Date.now() + 5000;
+        while (isPlaying() && Date.now() < idleDeadline) await wait(25);
+
+        await trigger({ angleSource: 'camera', syntheticCamera: false, releaseOn: 'auto' });
+
+        let calls = 0;
+        const callDeadline = Date.now() + 4000;
+        while (Date.now() < callDeadline) {
+          calls = await win.webContents.executeJavaScript('window.__winDuoGetUserMediaCalls');
+          if (calls > 0) break;
+          await wait(25);
+        }
+
+        // End the run while open() is still waiting on getUserMedia.
+        overlay.requestExit();
+        const endDeadline = Date.now() + 8000;
+        while (isPlaying() && Date.now() < endDeadline) await wait(25);
+        const endedBeforeResolve = !isPlaying();
+
+        // Now let the camera open complete, late.
+        await win.webContents.executeJavaScript('window.__winDuoResolveCamera && window.__winDuoResolveCamera()');
+        await wait(150);
+        const stops = await win.webContents.executeJavaScript('window.__winDuoCameraStops');
+        console.log(`delayed open: calls=${calls} endedBeforeResolve=${endedBeforeResolve} stops=${stops} hidden=${!win.isVisible()}`);
+
+        if (calls < 1) problems.push('the delayed-open test never reached getUserMedia');
+        if (!endedBeforeResolve) problems.push('the run did not end before the delayed camera open resolved');
+        if (stops < 1) problems.push('a camera stream survived a run that ended during open()');
+      } finally {
+        await win.webContents.executeJavaScript(`(() => {
+          if (window.__winDuoOriginalGet && window.MediaDevices) {
+            MediaDevices.prototype.getUserMedia = window.__winDuoOriginalGet;
+          }
+          if (window.__winDuoOriginalGetTracks && window.MediaStream) {
+            MediaStream.prototype.getTracks = window.__winDuoOriginalGetTracks;
+          }
+          if (window.__winDuoOriginalPlay) {
+            HTMLMediaElement.prototype.play = window.__winDuoOriginalPlay;
+          }
+          window.__winDuoResolveCamera = null;
+          return true;
+        })()`);
+      }
+    }
   }
 
   if (problems.length) {

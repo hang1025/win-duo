@@ -18,7 +18,7 @@ const {
 const Preferences = require('./preferences');
 const Overlay = require('./overlay');
 const { captureDisplay } = require('./capture');
-const { sweepOpenAngle, sweepShutAngle } = require('./defaults');
+const { sweepOpenAngle, sweepShutAngle, monitorAngles } = require('./defaults');
 const { trayIconDataUrl, appIconPng } = require('./icon');
 const { runSelfTest } = require('./selftest');
 const strings = require('../shared/strings');
@@ -27,6 +27,7 @@ const ARGS = process.argv.slice(1);
 const IS_SELFTEST = ARGS.includes('--selftest');
 const IS_VERIFY = ARGS.includes('--verify');
 const IS_VERIFY_CAMERA = ARGS.includes('--verify-camera');
+const IS_VERIFY_MONITOR = ARGS.includes('--verify-monitor');
 const IS_TIMING = ARGS.includes('--timing');
 const IS_CHECK_SETTINGS = ARGS.includes('--check-settings');
 const IS_SHOT_FOLD = ARGS.includes('--shot-fold');
@@ -55,12 +56,66 @@ let tray = null;
 let settingsWindow = null;
 let playing = false;
 let runWatchdog = null;
+let runCleanupTimer = null;
+/**
+ * The run admission latch. It is taken synchronously, before the first await in
+ * trigger(), so two triggers - a hotkey and a monitor crossing, say - can never
+ * both capture the screen and play. It is released on every failure path and in
+ * endRun.
+ */
+let runAdmission = false;
+/**
+ * A monotonic run id. The page echoes it back in its completion report, so a
+ * late report from an old run can never end a newer one.
+ */
+let runGeneration = 0;
+let currentRunId = 0;
 /** What the last run reported, for the camera verification. */
 let lastRunReport = null;
+/**
+ * The persistent monitor. `monitorPending` is the latch that stops a second
+ * crossing from starting a run while the first is still being set up;
+ * `monitorActive` mirrors what the page last reported, for the tray;
+ * `monitorSynthetic` is remembered so an automatic run reuses the same
+ * generated scene the verification harness started.
+ */
+let monitorPending = false;
+let monitorActive = false;
+let monitorSynthetic = false;
+/**
+ * The monitor decision counter. Every start, reconfigure and stop bumps it, and
+ * both processes ignore anything carrying an older number. This is what makes a
+ * disable that lands while a start, a capture or a run is still in flight win,
+ * instead of a late async step resurrecting the monitor.
+ */
+let monitorGeneration = 0;
+/** Set while the app is quitting, so overlay teardown does not restart the monitor. */
+let appQuitting = false;
 let lang = 'en';
 let S = null;
 /** Wall clock at the start of the current run, for timing marks. */
 let runStartedAt = 0;
+
+/**
+ * Test seams. The monitor verification makes the screen grab slow and shortens
+ * the watchdog, so the race paths can be exercised deterministically. In
+ * production these are the real capture and the real timeouts.
+ */
+let captureForRun = captureDisplay;
+let runTimeoutMs = RUN_TIMEOUT_MS;
+let forceCleanupMs = 2500;
+
+function setCaptureForTest(fn) {
+  captureForRun = typeof fn === 'function' ? fn : captureDisplay;
+}
+
+function setRunTimeoutsForTest(options) {
+  const source = options || {};
+  const watchdog = Number(source.watchdogMs);
+  const cleanup = Number(source.forceCleanupMs);
+  runTimeoutMs = Number.isFinite(watchdog) && watchdog > 0 ? watchdog : RUN_TIMEOUT_MS;
+  forceCleanupMs = Number.isFinite(cleanup) && cleanup > 0 ? cleanup : 2500;
+}
 
 // ---------------------------------------------------------------------------
 // Effect runs
@@ -74,9 +129,20 @@ let runStartedAt = 0;
  * contain the overlay itself.
  */
 async function trigger(overrides) {
-  if (playing || !prefs) return;
+  if (!prefs || runAdmission) return false;
   const settings = { ...prefs.all, ...(overrides || {}) };
-  if (!settings.enabled) return;
+  if (!settings.enabled) return false;
+
+  // Taken before the first await. From here until the run ends, no other
+  // trigger - manual or automatic - is admitted, so there is no window in
+  // which two runs both capture the screen.
+  runAdmission = true;
+  // Set only by the monitor crossing handler. It keeps an automatic run from
+  // ever opening a second camera when the monitor stream is not reusable.
+  const fromMonitor = Boolean(settings.fromMonitor);
+  // The monitor decision this automatic run belongs to. It is re-checked after
+  // the capture await, so a disable or reconfigure during the grab wins.
+  const monitorGen = monitorGeneration;
 
   runStartedAt = Date.now();
   const mark = (label) => {
@@ -92,25 +158,40 @@ async function trigger(overrides) {
   mark('grabbing the screen');
   let capture = null;
   try {
-    capture = await captureDisplay(display);
+    capture = await captureForRun(display);
   } catch (error) {
     console.error('[win-duo] screen capture failed:', error.message);
   }
-  if (!capture) return;
+  if (!capture) {
+    if (fromMonitor) console.warn('[win-duo] the automatic run could not grab the screen');
+    runAdmission = false;
+    return false;
+  }
   mark('screen grabbed');
 
+  // Revalidate the automatic request after the await: a monitor that was
+  // disabled or reconfigured while the screen was being grabbed must not start
+  // a delayed run, and the admission it holds must be handed back.
+  if (fromMonitor
+    && (!prefs.values.persistentMonitor || !prefs.values.enabled || monitorGeneration !== monitorGen)) {
+    runAdmission = false;
+    return false;
+  }
+
   playing = true;
+  const runId = (runGeneration += 1);
+  currentRunId = runId;
 
   if (runWatchdog) clearTimeout(runWatchdog);
   runWatchdog = setTimeout(() => {
     if (!playing) return;
-    console.warn('[win-duo] the run never reported back; releasing the overlay');
-    endRun();
-  }, RUN_TIMEOUT_MS);
+    requestRunCleanup('watchdog');
+  }, runTimeoutMs);
 
   try {
     await overlay.play(display, {
       settings,
+      runId,
       bgra: capture.bgra,
       width: capture.width,
       height: capture.height,
@@ -120,12 +201,20 @@ async function trigger(overrides) {
       openAngle: sweepOpenAngle(settings),
       shutAngle: sweepShutAngle(settings),
       syntheticCamera: Boolean(settings.syntheticCamera),
+      fromMonitor,
+      // While the monitor holds a camera, any camera run reuses that one
+      // stream rather than opening its own.
+      reuseMonitor: fromMonitor || (monitorActive && settings.angleSource === 'camera'),
     });
     mark('handed to the overlay');
     registerExitKey();
+    return true;
   } catch (error) {
     playing = false;
+    runAdmission = false;
+    currentRunId = 0;
     console.error('[win-duo] overlay failed:', error.message);
+    return false;
   }
 }
 
@@ -159,17 +248,109 @@ function saveLastRun(report) {
   }
 }
 
-function endRun(report) {
+function endRun(report, runId) {
+  // A completion that names a different run is a late report from an old one;
+  // it must not tear down the run that is actually up.
+  if (runId !== undefined && runId !== currentRunId) return;
   playing = false;
+  runAdmission = false;
+  currentRunId = 0;
+  // The latch is released only when the run it guarded is actually over. The
+  // page re-arms the monitor itself once the lid comes back.
+  monitorPending = false;
   lastRunReport = report || null;
   unregisterExitKey();
   if (runWatchdog) {
     clearTimeout(runWatchdog);
     runWatchdog = null;
   }
+  if (runCleanupTimer) {
+    clearTimeout(runCleanupTimer);
+    runCleanupTimer = null;
+  }
   if (overlay) overlay.hide();
   saveLastRun(report);
   calibrateFromRun(report);
+}
+
+/**
+ * Ends a run that has stopped responding, without trusting the page to report
+ * back. It asks the page to release first; if nothing comes back in a bounded
+ * time the overlay is torn down and recreated and the monitor state is
+ * re-synced, so a stuck or crashed page cannot leave ownership split across the
+ * two processes.
+ */
+function requestRunCleanup(reason) {
+  if (!playing) return;
+  const expected = currentRunId;
+  console.warn(`[win-duo] run ${expected} did not report back (${reason}); asking the overlay to release`);
+  if (overlay) overlay.requestExit();
+  if (runCleanupTimer) clearTimeout(runCleanupTimer);
+  runCleanupTimer = setTimeout(() => {
+    runCleanupTimer = null;
+    if (!playing || currentRunId !== expected) return;
+    console.warn(`[win-duo] run ${expected} still did not report back; resetting the overlay`);
+    hardResetOverlay();
+    endRun(null, expected);
+  }, forceCleanupMs);
+}
+
+/**
+ * Destroys the overlay page so the next ensure() builds a clean one, and
+ * forgets every monitor fact that belonged to the dead page. Monitoring is
+ * restarted only if the user still has it switched on.
+ */
+function hardResetOverlay() {
+  // Keep the synthetic flag so a test harness is not silently switched onto a
+  // real camera when the overlay is rebuilt.
+  const synthetic = monitorSynthetic;
+  monitorGeneration += 1;
+  monitorActive = false;
+  monitorPending = false;
+  monitorSynthetic = false;
+  if (overlay) overlay.reset();
+  if (prefs && prefs.values.persistentMonitor && prefs.values.enabled && !appQuitting) {
+    startPersistentMonitor({ syntheticCamera: synthetic });
+  } else {
+    refreshTray();
+  }
+}
+
+/**
+ * Recovery when the overlay page dies or is closed underneath us: no stale run
+ * or monitor state may survive, and the monitor is restarted only if it is
+ * still opted in.
+ */
+function handleOverlayGone(kind, details) {
+  if (appQuitting) return;
+  console.error(`[win-duo] overlay ${kind}${details ? `: ${JSON.stringify(details)}` : ''}`);
+  if (playing) {
+    playing = false;
+    runAdmission = false;
+    currentRunId = 0;
+    unregisterExitKey();
+    if (runWatchdog) {
+      clearTimeout(runWatchdog);
+      runWatchdog = null;
+    }
+    if (runCleanupTimer) {
+      clearTimeout(runCleanupTimer);
+      runCleanupTimer = null;
+    }
+  }
+  // Keep the synthetic flag so a test harness is not silently switched onto a
+  // real camera when the overlay is rebuilt.
+  const synthetic = monitorSynthetic;
+  monitorGeneration += 1;
+  monitorActive = false;
+  monitorPending = false;
+  monitorSynthetic = false;
+  if (overlay) overlay.reset();
+  if (prefs && prefs.values.persistentMonitor && prefs.values.enabled) {
+    startPersistentMonitor({ syntheticCamera: synthetic });
+  } else {
+    refreshTray();
+  }
 }
 
 /**
@@ -201,6 +382,96 @@ function calibrateFromRun(report) {
   if (next === current) return;
   prefs.update({ fullTravel: next });
   console.log(`[win-duo] full-travel estimate ${current} -> ${next} (this close measured ${peak.toFixed(1)})`);
+}
+
+// ---------------------------------------------------------------------------
+// Persistent monitor
+// ---------------------------------------------------------------------------
+
+/**
+ * Turns the persistent monitor on, or updates its settings while it is already
+ * on. The overlay page owns the single camera stream; this only describes what
+ * it should watch for. Safe to call repeatedly: the page keeps the same camera
+ * open and only reconfigures when nothing changed but the angles.
+ */
+async function startPersistentMonitor(overrides) {
+  if (!prefs || !overlay) return false;
+  // The headless check modes must never open a camera behind the user's back.
+  // `--verify-monitor` is the one exception, because driving the monitor is the
+  // whole point of it.
+  if (IS_CHECK && !IS_VERIFY_MONITOR) return false;
+  const settings = { ...prefs.all, ...(overrides || {}) };
+  if (!settings.persistentMonitor || !settings.enabled) return false;
+  // This request owns the newest monitor decision until something newer arrives.
+  const generation = (monitorGeneration += 1);
+  const angles = monitorAngles(settings);
+  monitorSynthetic = Boolean(settings.syntheticCamera);
+  try {
+    await overlay.startMonitor({
+      generation,
+      deviceId: settings.cameraDeviceId || '',
+      syntheticCamera: monitorSynthetic,
+      restAngle: settings.restAngle,
+      fullTravel: settings.fullTravel,
+      trackerGain: settings.trackerGain,
+      triggerAngle: angles.triggerAngle,
+      rearmAngle: angles.rearmAngle,
+    });
+  } catch (error) {
+    console.error('[win-duo] could not start the persistent monitor:', error.message);
+    return false;
+  }
+  if (generation !== monitorGeneration) {
+    // A stop or a newer configuration won while the window was coming up. If
+    // the newest decision is "off", send a corrective stop now that the page is
+    // loaded, so the late start cannot leave a stream open.
+    if (!(prefs.values.persistentMonitor && prefs.values.enabled)) {
+      overlay.stopMonitor({ generation: monitorGeneration });
+    }
+    return false;
+  }
+  monitorActive = true;
+  refreshTray();
+  return true;
+}
+
+/** Closes the monitor stream and clears the pending latch. */
+function stopPersistentMonitor() {
+  // Always bump: this invalidates any start that is still in flight, even one
+  // that has not reported active yet.
+  monitorGeneration += 1;
+  const generation = monitorGeneration;
+  const wasActive = monitorActive || monitorPending;
+  monitorActive = false;
+  monitorPending = false;
+  monitorSynthetic = false;
+  if (overlay) overlay.stopMonitor({ generation });
+  if (wasActive) refreshTray();
+}
+
+/**
+ * Starts or stops the monitor to match the current settings. Called after any
+ * settings change, so toggling the switch, disabling the effect or picking a
+ * different camera all take effect immediately. Always stops when monitoring is
+ * not wanted, so a start that is still awaiting its window is invalidated too.
+ */
+function syncMonitor(settings) {
+  if (settings && settings.persistentMonitor && settings.enabled) {
+    startPersistentMonitor(settings);
+  } else {
+    stopPersistentMonitor();
+  }
+}
+
+/** The settings the monitor actually reads; a change to any of them re-syncs. */
+const MONITOR_KEYS = [
+  'persistentMonitor', 'enabled', 'cameraDeviceId',
+  'restAngle', 'fullTravel', 'trackerGain',
+  'monitorTriggerAngle', 'monitorRearmAngle',
+];
+
+function monitorSettingsChanged(before, after) {
+  return MONITOR_KEYS.some((key) => before[key] !== after[key]);
 }
 
 // ---------------------------------------------------------------------------
@@ -284,8 +555,25 @@ function buildTrayMenu() {
       checked: Boolean(settings.enabled),
       click: (item) => {
         prefs.update({ enabled: item.checked });
+        syncMonitor(prefs.all);
         refreshTray();
       },
+    },
+    {
+      label: S.tray.monitor,
+      type: 'checkbox',
+      checked: Boolean(settings.persistentMonitor),
+      click: (item) => {
+        prefs.update({ persistentMonitor: item.checked });
+        syncMonitor(prefs.all);
+        refreshTray();
+      },
+    },
+    {
+      // A read-only status line, so the tray says whether the camera is
+      // actually being held open rather than only what the switch claims.
+      label: monitorActive ? S.tray.monitorOn : S.tray.monitorOff,
+      enabled: false,
     },
     {
       label: S.tray.launchAtLogin,
@@ -368,6 +656,7 @@ function registerIpc() {
     if (before.hotkey !== after.hotkey) registerHotkey();
     if (before.launchAtLogin !== after.launchAtLogin) applyLoginItem(after.launchAtLogin);
     if (before.displayMode !== after.displayMode && overlay) overlay.displayMode = after.displayMode;
+    if (monitorSettingsChanged(before, after)) syncMonitor(after);
 
     broadcastSettings(after);
     return after;
@@ -378,6 +667,7 @@ function registerIpc() {
     registerHotkey();
     applyLoginItem(after.launchAtLogin);
     if (overlay) overlay.displayMode = after.displayMode;
+    syncMonitor(after);
     broadcastSettings(after);
     return after;
   });
@@ -385,7 +675,65 @@ function registerIpc() {
   ipcMain.handle('wd:preview', () => { trigger(); });
   ipcMain.handle('wd:quit', () => { app.quit(); });
 
-  ipcMain.on('wd:overlay-finished', (_event, report) => { endRun(report); });
+  ipcMain.on('wd:overlay-finished', (_event, report) => {
+    // A late report from an older run carries an older id and is ignored, so it
+    // cannot end the run that is actually up.
+    const runId = report && report.runId;
+    if (runId !== undefined && runId !== currentRunId) return;
+    endRun(report);
+  });
+
+  /**
+   * The monitor saw the lid pass the relative trigger. The main process is the
+   * final gate: the admission latch means one run at a time, and a run already
+   * up wins over a fresh crossing.
+   */
+  ipcMain.on('wd:monitor-crossed', async (_event, info) => {
+    if (!prefs || !prefs.values.persistentMonitor || !prefs.values.enabled) return;
+    // Every crossing carries the monitor generation it was seen under. One
+    // from an older generation - in flight when the monitor was stopped or
+    // reconfigured - must not start a run, and must not touch the latch.
+    const generation = Number(info && info.generation);
+    if (!Number.isFinite(generation) || generation !== monitorGeneration) return;
+    if (runAdmission || monitorPending) return;
+    monitorPending = true;
+    const started = await trigger({
+      fromMonitor: true,
+      syntheticCamera: monitorSynthetic,
+      // An automatic run always ends itself when the lid comes back; waiting
+      // for Esc would hold the camera and never re-arm.
+      releaseOn: 'auto',
+    });
+    if (!started) {
+      monitorPending = false;
+      if (generation === monitorGeneration && prefs.values.persistentMonitor && prefs.values.enabled) {
+        // The screenshot or the overlay failed, but the monitor is unchanged.
+        // Keep it alive so the next close can try again, and re-arm rather than
+        // fire on this same crossing.
+        if (overlay) overlay.resumeMonitor({ generation: monitorGeneration });
+      } else {
+        // The monitor was stopped or reconfigured while the capture was in
+        // flight. Re-assert whatever the newest decision is instead of
+        // resurrecting a stale one, carrying the synthetic/test flag so a
+        // re-sync never switches a harness onto a real camera.
+        syncMonitor({ ...prefs.all, syntheticCamera: monitorSynthetic });
+      }
+    }
+  });
+
+  ipcMain.on('wd:monitor-status', (_event, status) => {
+    // Ignore a report from a monitor decision that has already been superseded.
+    const generation = Number(status && status.generation);
+    if (Number.isFinite(generation) && generation !== monitorGeneration) return;
+    const active = Boolean(status && status.active);
+    if (monitorActive !== active) {
+      monitorActive = active;
+      refreshTray();
+    }
+    if (status && status.error) {
+      console.warn(`[win-duo] persistent monitor could not start: ${status.error}`);
+    }
+  });
 
   ipcMain.on('wd:mark', (_event, name, at) => {
     if (process.env.WIN_DUO_DEBUG) {
@@ -428,6 +776,9 @@ async function onReady() {
   }
 
   overlay = new Overlay({ displayMode: prefs.values.displayMode });
+  // The page dying (crash, or closed underneath us) must not leave a run or a
+  // monitor owned by a process that no longer exists.
+  overlay.onGone = handleOverlayGone;
 
   if (IS_CHECK_SETTINGS) {
     const { checkSettings } = require('./check-settings');
@@ -502,6 +853,35 @@ async function onReady() {
     return;
   }
 
+  if (IS_VERIFY_MONITOR) {
+    const { verifyMonitor } = require('./verify-monitor');
+    registerIpc();
+    try {
+      const code = await verifyMonitor({
+        trigger,
+        overlay,
+        wait,
+        isPlaying: () => playing,
+        prefs,
+        getLastReport: () => lastRunReport,
+        startMonitor: startPersistentMonitor,
+        stopMonitor: stopPersistentMonitor,
+        isMonitorActive: () => monitorActive,
+        isMonitorPending: () => monitorPending,
+        setCaptureForTest,
+        setRunTimeoutsForTest,
+        isRunAdmitted: () => runAdmission,
+        getCurrentRunId: () => currentRunId,
+      });
+      process.exitCode = code;
+      exitAfterFlush(code);
+    } catch (error) {
+      console.error('[win-duo] monitor verification failed:', error);
+      exitAfterFlush(1);
+    }
+    return;
+  }
+
   if (IS_VERIFY) {
     const { verifyOverlay } = require('./verify');
     registerIpc();
@@ -521,6 +901,12 @@ async function onReady() {
   registerHotkey();
   registerIpc();
   applyLoginItem(prefs.values.launchAtLogin);
+
+  // Opt-in and off by default: only start holding the camera open when the
+  // user has actually asked for it.
+  if (prefs.values.persistentMonitor && prefs.values.enabled) {
+    startPersistentMonitor();
+  }
 
   // `--shot-settings <path>`: open the settings panel, screenshot it and quit.
   // Used to check the panel renders, and to keep the README's picture current.
@@ -551,7 +937,7 @@ async function onReady() {
  * silently with a zero exit code - which is exactly what used to happen, and it
  * looks like the checks passed when they never ran at all.
  */
-const IS_CHECK = IS_SELFTEST || IS_VERIFY || IS_VERIFY_CAMERA || IS_TIMING
+const IS_CHECK = IS_SELFTEST || IS_VERIFY || IS_VERIFY_CAMERA || IS_VERIFY_MONITOR || IS_TIMING
   || IS_CHECK_SETTINGS || IS_SHOT_FOLD || IS_DIAGNOSE_COVER || ARGS.includes('--shot-settings');
 
 if (!IS_CHECK && !app.requestSingleInstanceLock()) {
@@ -560,6 +946,15 @@ if (!IS_CHECK && !app.requestSingleInstanceLock()) {
   app.on('second-instance', () => { openSettings(); });
   // The app lives in the tray: closing the settings window must not quit it.
   app.on('window-all-closed', () => {});
-  app.on('will-quit', () => { globalShortcut.unregisterAll(); });
+  // before-quit fires before the windows are torn down, so the closed handler
+  // knows not to try to restart monitoring on the way out.
+  app.on('before-quit', () => { appQuitting = true; });
+  app.on('will-quit', () => {
+    appQuitting = true;
+    globalShortcut.unregisterAll();
+    // Release the camera before the process goes down, rather than leaving it
+    // to the renderer teardown.
+    if (overlay) overlay.stopMonitor({ generation: monitorGeneration + 1 });
+  });
   app.whenReady().then(onReady);
 }

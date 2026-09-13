@@ -144,6 +144,10 @@
           </select>
         </div>
         <div class="switch">
+          <span data-i18n="params.cameraDevice.label"></span>
+          <select id="camera-device" data-key="cameraDeviceId"></select>
+        </div>
+        <div class="switch">
           <span data-i18n="params.releaseOn.label"></span>
           <select data-key="releaseOn">
             <option value="auto" data-i18n="params.releaseOn.auto"></option>
@@ -156,7 +160,19 @@
         </label>
       </div>
       <div class="hint" data-i18n="params.angleSource.hint"></div>
+      <div class="hint" data-i18n="params.cameraDevice.hint"></div>
       <div class="hint" data-i18n="params.releaseOn.hint"></div>
+    </section>
+
+    <section id="monitor-section">
+      <h2 data-i18n="settings.monitor"></h2>
+      <div class="switches">
+        <label class="switch">
+          <span data-i18n="params.persistentMonitor.label"></span>
+          <input type="checkbox" data-key="persistentMonitor" />
+        </label>
+      </div>
+      <div class="hint" data-i18n="params.persistentMonitor.hint"></div>
     </section>
 
     <section>

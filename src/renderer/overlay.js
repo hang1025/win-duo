@@ -197,6 +197,44 @@
   /** Spring that smooths the tracked progress, so sensor noise cannot jitter it. */
   let trackerSpring = null;
 
+  // --- Persistent monitor -------------------------------------------------
+  // One camera stream, owned by this page, kept open between runs when the
+  // user turns the monitor on. A close crossing the relative trigger asks the
+  // main process to start a run; that run reuses this exact tracker instead of
+  // opening a second stream. Sampling uses a timer, never requestAnimationFrame:
+  // the window is hidden between runs and rAF would simply not fire.
+  const MONITOR_INTERVAL_MS = 66;
+  // How long a run will wait for the monitor's camera to finish opening before
+  // giving up and using the scripted sweep, rather than opening a second stream.
+  const MONITOR_ADOPT_WAIT_MS = 1200;
+  const monitor = {
+    active: false,
+    ready: false,
+    paused: false,
+    /** A crossing was reported and the main process has not answered yet. */
+    pending: false,
+    tracker: null,
+    state: null,
+    timer: 0,
+    /** Bumped whenever the stream is replaced, so a late open() is dropped. */
+    token: 0,
+    /** The newest monitor decision from the main process; older ones are ignored. */
+    generation: 0,
+    /** True while a camera open is in flight, so a same-device start does not repeat it. */
+    opening: false,
+    /** Opens are serialized here, so only one getUserMedia is ever outstanding. */
+    openChain: Promise.resolve(),
+    /** Set when a camera change arrives while a run owns the stream. */
+    reopenAfterRun: false,
+    config: null,
+    lastTravel: 0,
+    direction: 1,
+    runOwnsTracker: false,
+    closeAfterRun: false,
+    crossings: 0,
+    reusedLastRun: false,
+  };
+
   const hintElement = document.getElementById('hint');
   const readoutElement = document.getElementById('readout');
   let hintTimer = 0;
@@ -439,6 +477,9 @@
 
     let target = NS.gradient.clamp01(pastNeutral / span);
     if (state.releasing) target = 0;
+    // A run that is waiting for the monitor's camera to open has no spring yet;
+    // give it one so the frame loop is safe while it waits.
+    if (!trackerSpring) trackerSpring = new NS.Spring(0, settings.trackerSpringFrequency);
     // The ease back to flat runs at its own, faster frequency: at the tracking
     // frequency it alone takes about half a second, which is what made clicking
     // to exit feel unresponsive.
@@ -520,7 +561,9 @@
   function beginRelease(reason) {
     state.releasing = true;
     state.releaseReason = reason;
-    if (tracker) tracker.close();
+    // A monitor-owned stream must survive the release so the next close can be
+    // seen; only a run that owns its own camera closes it here.
+    if (tracker && !state.reuseMonitor) tracker.close();
     if (window.winDuoBridge && window.winDuoBridge.mark) {
       window.winDuoBridge.mark(`release:${reason}`);
     }
@@ -564,6 +607,7 @@
     if (state.fadingOut && state.opacity <= 0.0005) {
       const report = {
         mode: state.mode,
+        runId: state.runId,
         synthetic: Boolean(state.syntheticCamera),
         engaged: state.engaged,
         peakTravel: state.peakTravel,
@@ -577,10 +621,24 @@
         trace: state.trace,
       };
       const closing = tracker;
+      const reused = state.reuseMonitor;
       state = null;
       tracker = null;
       trackerSpring = null;
-      if (closing) closing.close();
+      if (reused) {
+        // Hand the same stream straight back to the monitor. It is not closed
+        // here; only stopping monitoring closes it.
+        releaseMonitorTracker();
+      } else {
+        if (closing) closing.close();
+        // A run that did not reuse the monitor stream still suppressed it;
+        // let it re-arm now that the run is over.
+        if (monitor.active && monitor.state && monitor.state.state === 'running') {
+          monitor.pending = false;
+          monitor.state.noteRunFinished();
+          scheduleMonitorSample();
+        }
+      }
       hideHint();
       if (readoutElement) readoutElement.style.opacity = '0';
       if (window.winDuoBridge) window.winDuoBridge.finished(report);
@@ -663,6 +721,12 @@
       // alone: a synthetic run would otherwise teach the user's settings a
       // travel distance that came out of a test pattern.
       syntheticCamera: Boolean(payload.syntheticCamera),
+      // True when this run should adopt the monitor's already-open tracker
+      // instead of opening its own stream.
+      reuseMonitor: Boolean(payload.reuseMonitor),
+      // Echoed back in the completion report, so a late report from an older
+      // run cannot end a newer one in the main process.
+      runId: payload.runId,
       // +1 or -1: which sign of tracked travel means the lid is closing. Latched
       // from the first real movement, because it depends on the hardware.
       direction: 1,
@@ -685,29 +749,56 @@
     };
   }
 
+  /** Falls back to the scripted sweep when the camera cannot be used. */
+  function fallbackToSweep(note) {
+    state.mode = 'sweep';
+    state.phase = 'sweep';
+    state.startAngle = state.settings.thresholdAngle;
+    state.spring = new NS.Spring(state.openAngle, state.settings.springFrequency);
+    state.t0 = performance.now();
+    tracker = null;
+    trackerSpring = null;
+    showHint(note ? `摄像头打不开，改用脚本动画：${note}` : '脚本动画', note ? 6000 : 1500);
+  }
+
   /**
    * Opens the camera and starts tracking. Runs after the picture is up, so the
    * cost of the camera is not added to the cost of the screen grab.
    */
   async function startCamera(payload) {
-    const local = new NS.LidTracker({ synthetic: Boolean(payload.syntheticCamera) });
+    const local = new NS.LidTracker({
+      synthetic: Boolean(payload.syntheticCamera),
+      deviceId: payload.settings.cameraDeviceId,
+    });
+    // The run this camera belongs to. `state` is replaced when a new run starts
+    // and cleared when one ends, so comparing against it after the await below
+    // tells us whether this camera is still wanted.
+    const run = state;
     tracker = local;
-    trackerSpring = new NS.Spring(0, state.settings.trackerSpringFrequency);
+    trackerSpring = new NS.Spring(0, run.settings.trackerSpringFrequency);
 
-    const opened = await local.open();
-    if (!state) return;
+    let opened = false;
+    try {
+      opened = await local.open();
+    } catch (error) {
+      // open() reports failure by returning false; an unexpected throw must not
+      // escape as an unhandled rejection. Release anything it acquired.
+      local.note = `摄像头打不开: ${error ? error.message : '未知错误'}`;
+      local.close();
+      opened = false;
+    }
+
+    // The run ended, or a later run replaced this one, while the camera was
+    // still opening. Drop the late result instead of touching the new state.
+    if (run.releasing || state !== run || tracker !== local) {
+      local.close();
+      return;
+    }
 
     if (!opened) {
       // A dead overlay would be worse than the wrong animation, so fall back to
       // the scripted sweep and say so.
-      state.mode = 'sweep';
-      state.phase = 'sweep';
-      state.startAngle = state.settings.thresholdAngle;
-      state.spring = new NS.Spring(state.openAngle, state.settings.springFrequency);
-      state.t0 = performance.now();
-      tracker = null;
-      trackerSpring = null;
-      showHint(`摄像头打不开，改用脚本动画：${local.note}`, 6000);
+      fallbackToSweep(local.note);
       return;
     }
 
@@ -726,6 +817,419 @@
     if (window.winDuoBridge && window.winDuoBridge.mark) window.winDuoBridge.mark('camera-ready');
   }
 
+  // --- Persistent monitor -------------------------------------------------
+
+  /** A finite number, or the fallback. Keeps a legitimate 0 from being lost. */
+  function numberOr(value, fallback) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : fallback;
+  }
+
+  function newMonitorState(config) {
+    return new NS.MonitorState({
+      triggerAngle: config.triggerAngle,
+      rearmAngle: config.rearmAngle,
+      restAngle: config.restAngle,
+      fullTravel: config.fullTravel,
+      gain: config.trackerGain,
+    });
+  }
+
+  function applyMonitorConfig(config) {
+    const source = config || {};
+    monitor.config = {
+      deviceId: typeof source.deviceId === 'string' ? source.deviceId : '',
+      synthetic: Boolean(source.syntheticCamera),
+      restAngle: numberOr(source.restAngle, 105),
+      fullTravel: Math.max(1, numberOr(source.fullTravel, 170)),
+      trackerGain: numberOr(source.trackerGain, 1),
+      triggerAngle: numberOr(source.triggerAngle, 12),
+      // Zero is a legitimate re-arm angle: `|| 5` would silently swallow it.
+      rearmAngle: Math.max(0, numberOr(source.rearmAngle, 5)),
+    };
+    if (monitor.state) {
+      monitor.state.configure({
+        triggerAngle: monitor.config.triggerAngle,
+        rearmAngle: monitor.config.rearmAngle,
+        restAngle: monitor.config.restAngle,
+        fullTravel: monitor.config.fullTravel,
+        gain: monitor.config.trackerGain,
+      });
+    }
+  }
+
+  function monitorWantsSameDevice() {
+    return Boolean(monitor.tracker)
+      && monitor.tracker.deviceId === monitor.config.deviceId
+      && Boolean(monitor.tracker.synthetic) === monitor.config.synthetic;
+  }
+
+  function scheduleMonitorSample() {
+    if (monitor.timer) return;
+    if (!monitor.active || monitor.paused || !monitor.ready || !monitor.tracker) return;
+    monitor.timer = window.setTimeout(sampleMonitor, MONITOR_INTERVAL_MS);
+  }
+
+  function reportMonitorStatus(active, error) {
+    if (window.winDuoBridge && window.winDuoBridge.monitorStatus) {
+      window.winDuoBridge.monitorStatus({
+        active: Boolean(active),
+        error: error || '',
+        generation: monitor.generation,
+      });
+    }
+  }
+
+  /**
+   * One monitor sample. A crossing is reported to the main process exactly
+   * once, then suppressed until the main process either starts a run or tells
+   * this page to resume.
+   */
+  function sampleMonitor() {
+    monitor.timer = 0;
+    if (!monitor.active || monitor.paused || !monitor.ready || !monitor.tracker) return;
+    const travel = monitor.tracker.sample();
+    if (travel !== null && monitor.state) {
+      const event = monitor.state.update(travel);
+      monitor.lastTravel = travel;
+      if (event.direction) monitor.direction = event.direction;
+      if (event.crossed && !monitor.pending) {
+        monitor.pending = true;
+        monitor.crossings += 1;
+        if (window.winDuoBridge && window.winDuoBridge.monitorCrossed) {
+          window.winDuoBridge.monitorCrossed({
+            // The generation this crossing was seen under. The main process
+            // rejects a crossing whose generation is no longer current, so one
+            // that was in flight when the monitor was stopped or reconfigured
+            // cannot start an automatic run.
+            generation: monitor.generation,
+            travel,
+            direction: monitor.direction,
+            angle: event.angle,
+            synthetic: Boolean(monitor.config && monitor.config.synthetic),
+          });
+        }
+      }
+    }
+    scheduleMonitorSample();
+  }
+
+  /**
+   * Opens the one stream the monitor keeps. Called again with new settings
+   * while monitoring is on: the same camera is left open and only the config
+   * changes, while a different camera replaces the stream.
+   *
+   * A start carries a generation from the main process. An older generation
+   * than the last one applied is ignored, so a start that arrives after a stop
+   * cannot resurrect the monitor.
+   */
+  async function startMonitor(config) {
+    const generation = numberOr(config && config.generation, NaN);
+    if (Number.isFinite(generation) && generation < monitor.generation) return;
+    if (Number.isFinite(generation)) monitor.generation = generation;
+
+    applyMonitorConfig(config);
+    monitor.active = true;
+    monitor.closeAfterRun = false;
+
+    // A run currently owns the stream. If a different camera is now wanted,
+    // remember to reopen it when the run hands the tracker back; the stream is
+    // never swapped out from under a live run.
+    if (monitor.runOwnsTracker) {
+      if (!monitorWantsSameDevice()) monitor.reopenAfterRun = true;
+      return;
+    }
+
+    if (monitorWantsSameDevice() && (monitor.ready || monitor.opening)) {
+      // Same camera, already open or still opening. Only the config changes;
+      // opening again here would be a second getUserMedia on the same device.
+      monitor.paused = false;
+      // A reconfigure that lands while a crossing is still pending must clear
+      // the latch as well as re-arm. Every start carries a newer generation, and
+      // the main process revalidates the in-flight automatic run against it and
+      // aborts it, so that crossing can never become a run. Leaving `pending`
+      // set would make sampleMonitor refuse to report the next close and wedge
+      // the monitor. The guard is the state itself: a no-op start leaves the
+      // state as 'watching' or 'running' and never reaches here, so a crossing
+      // that is still legitimately waiting for its run is not erased.
+      if (monitor.ready && !monitor.runOwnsTracker
+        && monitor.state && monitor.state.state === 'triggered') {
+        monitor.pending = false;
+        monitor.state.noteRunFinished();
+      }
+      if (monitor.ready) scheduleMonitorSample();
+      return;
+    }
+
+    enqueueMonitorOpen();
+  }
+
+  /**
+   * Queues an open. Opens are serialized, so a camera change that arrives while
+   * an earlier getUserMedia is still in flight waits for it to settle (and be
+   * closed) before starting the next one. Only one physical stream is ever
+   * opening at a time.
+   */
+  function enqueueMonitorOpen() {
+    const token = (monitor.token += 1);
+    monitor.openChain = monitor.openChain
+      .then(() => openMonitorDevice(token))
+      .catch((error) => {
+        console.error('[win-duo] monitor open failed:', error && error.message);
+      });
+  }
+
+  async function openMonitorDevice(token) {
+    // Superseded while queued behind an earlier open.
+    if (!monitor.active || monitor.token !== token) return;
+
+    if (monitor.timer) {
+      window.clearTimeout(monitor.timer);
+      monitor.timer = 0;
+    }
+    if (monitor.tracker) {
+      monitor.tracker.close();
+      monitor.tracker = null;
+    }
+    monitor.ready = false;
+    monitor.crossings = 0;
+    monitor.reusedLastRun = false;
+    window.__winDuoMonitorTrack = null;
+
+    const local = new NS.LidTracker({
+      synthetic: monitor.config.synthetic,
+      deviceId: monitor.config.deviceId,
+    });
+    monitor.tracker = local;
+    monitor.state = newMonitorState(monitor.config);
+    monitor.direction = 1;
+    monitor.lastTravel = 0;
+    monitor.opening = true;
+
+    let opened = false;
+    try {
+      opened = await local.open();
+    } catch (error) {
+      local.note = `摄像头打不开: ${error ? error.message : '未知错误'}`;
+      local.close();
+      opened = false;
+    } finally {
+      monitor.opening = false;
+    }
+
+    // Stopped, replaced, or superseded while opening: close the late stream
+    // rather than leaving the camera light on with nothing watching it.
+    if (!monitor.active || monitor.token !== token || monitor.tracker !== local) {
+      local.close();
+      return;
+    }
+
+    if (!opened) {
+      monitor.active = false;
+      monitor.ready = false;
+      monitor.tracker = null;
+      monitor.state = null;
+      reportMonitorStatus(false, local.note);
+      showHint(`摄像头打不开，自动监测已关闭：${local.note}`, 6000);
+      return;
+    }
+
+    monitor.ready = true;
+    monitor.paused = false;
+    monitor.reopenAfterRun = false;
+    monitor.state.start(local.sample());
+    monitor.direction = monitor.state.direction || 1;
+    monitor.lastTravel = 0;
+
+    if (local.synthetic) {
+      window.__winDuoMonitorTrack = {
+        get offset() { return local.offset; },
+        step(pixels) { local.offset += pixels; return local.offset; },
+        reset() { local.reset(); },
+      };
+    }
+
+    reportMonitorStatus(true, '');
+    showHint('自动监测中 · 合盖自动折叠', 4000);
+    scheduleMonitorSample();
+  }
+
+  /** Stops monitoring and closes the stream, unless a run still owns it. */
+  function stopMonitor(payload) {
+    const generation = numberOr(payload && payload.generation, NaN);
+    if (Number.isFinite(generation) && generation < monitor.generation) return;
+    if (Number.isFinite(generation)) monitor.generation = generation;
+
+    monitor.active = false;
+    monitor.paused = true;
+    monitor.pending = false;
+    monitor.reopenAfterRun = false;
+    if (monitor.state) monitor.state.stop();
+    if (monitor.timer) {
+      window.clearTimeout(monitor.timer);
+      monitor.timer = 0;
+    }
+    window.__winDuoMonitorTrack = null;
+    // Bump the token so a queued or in-flight open is cancelled when it
+    // resolves, even if a run currently owns the previous stream.
+    monitor.token += 1;
+    if (monitor.runOwnsTracker) {
+      // A run still holds the stream; close it when that run finishes.
+      monitor.closeAfterRun = true;
+      return;
+    }
+    if (monitor.tracker) {
+      monitor.tracker.close();
+      monitor.tracker = null;
+    }
+    monitor.ready = false;
+  }
+
+  /** The main process could not start a run; keep watching safely. */
+  function resumeMonitor(payload) {
+    const generation = numberOr(payload && payload.generation, NaN);
+    if (Number.isFinite(generation) && generation !== monitor.generation) return;
+    if (!monitor.active || !monitor.ready) return;
+    monitor.pending = false;
+    monitor.paused = false;
+    // Suppress the crossing that was just reported until the lid re-arms.
+    if (monitor.state) monitor.state.noteRunFinished();
+    scheduleMonitorSample();
+  }
+
+  /**
+   * Hands the monitor's stream to a visual run. Returns false when there is no
+   * usable monitor tracker, in which case the caller must not open a second
+   * camera for an automatic run.
+   */
+  function adoptMonitorTracker() {
+    const run = state;
+    if (!monitor.tracker || !monitor.tracker.available) return false;
+
+    monitor.paused = true;
+    monitor.pending = false;
+    monitor.runOwnsTracker = true;
+    monitor.reusedLastRun = true;
+    if (monitor.state) monitor.state.noteRunStarted();
+
+    tracker = monitor.tracker;
+    const full = Math.max(1, Number(run.settings.fullTravel) || 170);
+    const engageRows = full * run.settings.engageFraction;
+    run.travel = monitor.lastTravel;
+    run.direction = monitor.direction || 1;
+    run.peakMagnitude = Math.abs(monitor.lastTravel);
+    const seeded = Math.max(0, monitor.lastTravel * run.direction);
+    run.peakTravel = seeded;
+    run.maxPeak = seeded;
+
+    // Seed the spring at the current lid position, so the fold picks up where
+    // the lid already is instead of snapping up from flat.
+    const restAngle = Number(run.settings.restAngle);
+    const foldAngle = Number(run.settings.foldAngle) || 50;
+    const span = Math.max(1, restAngle - foldAngle);
+    const neutralBand = Math.max(0, Number(run.settings.neutralBand) || 0);
+    const degrees = (seeded / full) * restAngle * (Number(run.settings.trackerGain) || 1);
+    const progress = NS.gradient.clamp01(Math.max(0, degrees - neutralBand) / span);
+    trackerSpring = new NS.Spring(progress, run.settings.trackerSpringFrequency);
+    run.progress = progress;
+    run.angle = restAngle - progress * span;
+
+    if (seeded > engageRows) {
+      run.engaged = true;
+      run.engagedAt = performance.now();
+      run.phase = 'tracking';
+      hideHint();
+    }
+    return true;
+  }
+
+  /**
+   * Called when a run that reused the monitor tracker finishes: the stream is
+   * handed straight back to the monitor, never closed, unless monitoring was
+   * switched off while the run was up.
+   */
+  function releaseMonitorTracker() {
+    if (!monitor.runOwnsTracker) return;
+    monitor.runOwnsTracker = false;
+    if (monitor.closeAfterRun || !monitor.active) {
+      monitor.closeAfterRun = false;
+      monitor.reopenAfterRun = false;
+      if (monitor.tracker) {
+        monitor.tracker.close();
+        monitor.tracker = null;
+      }
+      monitor.ready = false;
+      return;
+    }
+    // A camera change that arrived while the run owned the stream is applied
+    // now, so the requested device is actually opened instead of the old one
+    // being reused forever.
+    if (monitor.reopenAfterRun || !monitorWantsSameDevice()) {
+      monitor.reopenAfterRun = false;
+      if (monitor.tracker) {
+        monitor.tracker.close();
+        monitor.tracker = null;
+      }
+      monitor.ready = false;
+      enqueueMonitorOpen();
+      return;
+    }
+    monitor.paused = false;
+    monitor.pending = false;
+    if (monitor.state) monitor.state.noteRunFinished();
+    scheduleMonitorSample();
+  }
+
+  /**
+   * Uses the monitor's stream for this run. If the monitor is still opening its
+   * camera, this waits a bounded time for it rather than opening a second
+   * stream. If no stream can be had it falls back to the scripted sweep: an
+   * automatic run must never open its own camera, and a manual run keeps the
+   * single-stream promise while monitoring is active.
+   */
+  async function adoptOrWaitForMonitor() {
+    const run = state;
+    if (!run) return;
+    const deadline = performance.now() + MONITOR_ADOPT_WAIT_MS;
+    while (state === run && !run.releasing && !run.fadingOut) {
+      if (adoptMonitorTracker()) return;
+      if (!monitor.active) break;
+      if (performance.now() >= deadline) break;
+      await new Promise((resolve) => window.setTimeout(resolve, 30));
+    }
+    if (state !== run || run.releasing) return;
+    // No monitor stream to reuse. Fall back to the scripted sweep and let the
+    // monitor re-arm once this run is over.
+    run.reuseMonitor = false;
+    if (monitor.active && monitor.state) {
+      monitor.pending = false;
+      monitor.state.noteRunStarted();
+    }
+    fallbackToSweep('');
+  }
+
+  // The main process can ask what the monitor is doing, and the verification
+  // harness drives the synthetic scene through __winDuoMonitorTrack.
+  window.__winDuoMonitorDebug = () => ({
+    active: monitor.active,
+    ready: monitor.ready,
+    paused: monitor.paused,
+    pending: monitor.pending,
+    opening: monitor.opening,
+    runOwnsTracker: monitor.runOwnsTracker,
+    reopenAfterRun: monitor.reopenAfterRun,
+    hasTracker: Boolean(monitor.tracker),
+    deviceId: monitor.tracker ? monitor.tracker.deviceId : (monitor.config ? monitor.config.deviceId : ''),
+    synthetic: monitor.tracker ? Boolean(monitor.tracker.synthetic) : Boolean(monitor.config && monitor.config.synthetic),
+    generation: monitor.generation,
+    travel: Number(monitor.lastTravel.toFixed(2)),
+    direction: monitor.direction,
+    state: monitor.state ? monitor.state.state : 'off',
+    angle: monitor.state ? Number(monitor.state.lastAngle.toFixed(2)) : 0,
+    crossings: monitor.crossings,
+    reused: monitor.reusedLastRun,
+  });
+
   function play(payload) {
     try {
       const received = performance.now();
@@ -739,8 +1243,25 @@
         firstFrameMs: null,
         bytes: payload.bgra ? payload.bgra.length : 0,
       };
-      if (state.mode === 'camera') startCamera(payload);
-      else showHint('脚本动画', 1500);
+      if (state.mode === 'camera') {
+        if (state.reuseMonitor) {
+          // The monitor owns the camera. Adopt its stream, waiting briefly for
+          // it to finish opening rather than opening a second physical stream.
+          adoptOrWaitForMonitor();
+        } else {
+          // The monitor is not active: a manual run may open its own camera.
+          startCamera(payload);
+        }
+      } else {
+        showHint('脚本动画', 1500);
+      }
+      // A run is now up. If it is not reusing the monitor stream (a scripted
+      // run, say), the monitor must still stop firing until the run is over;
+      // it is re-armed in the run's fade-out below.
+      if (monitor.active && !state.reuseMonitor && monitor.state) {
+        monitor.pending = false;
+        monitor.state.noteRunStarted();
+      }
       if (!rafId) rafId = window.requestAnimationFrame(frame);
       if (window.winDuoBridge.mark) window.winDuoBridge.mark('picture-built');
     } catch (error) {
@@ -817,6 +1338,18 @@
         if (!state || state.releasing) return;
         beginRelease('escape');
       });
+    }
+    // The persistent monitor: one stream kept open between runs. The main
+    // process owns the decision to start a run; this page only reports a
+    // crossing and hands the tracker over.
+    if (window.winDuoBridge.onMonitorStart) {
+      window.winDuoBridge.onMonitorStart((config) => { startMonitor(config); });
+    }
+    if (window.winDuoBridge.onMonitorStop) {
+      window.winDuoBridge.onMonitorStop((payload) => { stopMonitor(payload); });
+    }
+    if (window.winDuoBridge.onMonitorResume) {
+      window.winDuoBridge.onMonitorResume((payload) => { resumeMonitor(payload); });
     }
     if (selfTest) window.winDuoBridge.onSelftestPayload((payload) => window.__winDuoSelftest.store(payload));
   }

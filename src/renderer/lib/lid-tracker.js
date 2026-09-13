@@ -132,6 +132,29 @@ window.WinDuo = window.WinDuo || {};
     }
   }
 
+  /**
+   * The video constraints for one getUserMedia attempt: the existing ideal
+   * dimensions and frame rate, plus an exact device selector when one is set.
+   *
+   * An exact constraint is deliberate. If the chosen camera has gone away, the
+   * request should fail here so the caller can fall back, rather than silently
+   * opening a different camera and tracking a scene the user did not choose.
+   */
+  function videoConstraints(deviceId) {
+    const video = { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 30 } };
+    if (deviceId) video.deviceId = { exact: deviceId };
+    return video;
+  }
+
+  /**
+   * The sole constraint set to try. A saved device is always exact, while an
+   * empty id deliberately delegates selection to the system default. Pure, so
+   * the selection policy can be checked without a camera.
+   */
+  function cameraAttempts(deviceId) {
+    return [videoConstraints(deviceId)];
+  }
+
   class LidTracker {
     constructor(options = {}) {
       this.width = options.width || 160;
@@ -145,6 +168,8 @@ window.WinDuo = window.WinDuo || {};
       this.confidenceFloor = options.confidenceFloor === undefined ? 0.7 : options.confidenceFloor;
       this.varianceFloor = options.varianceFloor === undefined ? 4 : options.varianceFloor;
       this.synthetic = Boolean(options.synthetic);
+      // '' is the system default. It is ignored entirely in synthetic mode.
+      this.deviceId = options.deviceId || '';
 
       this.stripWidth = this.width / this.strips;
       this.total = 0;
@@ -169,20 +194,51 @@ window.WinDuo = window.WinDuo || {};
         this.available = true;
         this.note = 'synthetic';
       } else {
-        try {
-          this.stream = await navigator.mediaDevices.getUserMedia({
-            video: { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 30 } },
-          });
-        } catch (error) {
-          this.note = `摄像头打不开: ${error.message}`;
+        if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
+          this.note = '摄像头打不开: mediaDevices 不可用';
+          this.available = false;
+          return false;
+        }
+        // A selected camera is always opened exactly. Only an empty preference
+        // delegates selection to the system default; otherwise a failure falls
+        // back to the scripted sweep rather than opening a different camera.
+        const attempts = cameraAttempts(this.deviceId);
+        let failure = null;
+        for (const video of attempts) {
+          try {
+            this.stream = await navigator.mediaDevices.getUserMedia({ video });
+            failure = null;
+            break;
+          } catch (error) {
+            failure = error;
+            this.stream = null;
+          }
+        }
+        if (!this.stream) {
+          this.note = `摄像头打不开: ${failure ? failure.message : '未知错误'}`;
           this.available = false;
           return false;
         }
         this.video = document.createElement('video');
-        this.video.srcObject = this.stream;
-        this.video.muted = true;
-        this.video.playsInline = true;
-        await this.video.play();
+        try {
+          this.video.srcObject = this.stream;
+          this.video.muted = true;
+          this.video.playsInline = true;
+          await this.video.play();
+        } catch (error) {
+          // getUserMedia has already succeeded, so the stream is live. A failed
+          // play() would otherwise throw past the caller and leave the camera
+          // light on. Release the tracks and report failure so the overlay can
+          // fall back to the sweep, exactly as it does when capture fails.
+          if (this.stream) {
+            this.stream.getTracks().forEach((track) => track.stop());
+          }
+          this.stream = null;
+          this.video = null;
+          this.note = `摄像头打不开: ${error ? error.message : '未知错误'}`;
+          this.available = false;
+          return false;
+        }
         this.available = true;
         this.note = '';
       }
@@ -304,5 +360,5 @@ window.WinDuo = window.WinDuo || {};
   }
 
   NS.LidTracker = LidTracker;
-  NS.lidTracker = { bestShift, median, drawSyntheticScene };
+  NS.lidTracker = { bestShift, median, drawSyntheticScene, videoConstraints, cameraAttempts };
 })(window.WinDuo);
