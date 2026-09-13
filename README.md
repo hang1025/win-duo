@@ -66,8 +66,10 @@ MacBook 有专门的合盖角度传感器，所以它的效果能严丝合缝跟
 > 每台笔记本的摄像头都是刚性固定在盖子上的。盖子转多少度，摄像头就转多少度，
 > 画面里的场景就会整体平移——这个关系是几何必然，跟耳机、网线、房间光线通通无关。
 
-摄像头指示灯**只在效果运行期间亮**（从按 `Ctrl+Alt+D` 到按 `Esc`）。
+默认情况下，摄像头指示灯**只在效果运行期间亮**（从按 `Ctrl+Alt+D` 到按 `Esc`）。
 它在本地实时算一个数字来判断角度，**画面一帧都不保存、不缓存、不上传**。
+设置里还有一个可选的「**自动监测合盖**」，**默认关闭**；打开后摄像头会一直在后台工作、指示灯一直亮，
+用来换取"合盖即自动触发"，不想要灯常亮就别开它。
 
 </details>
 
@@ -81,11 +83,11 @@ MacBook 有专门的合盖角度传感器，所以它的效果能严丝合缝跟
 
 **摄像头指示灯一直亮着，正常吗？**
 
-正常，但**只在效果运行期间亮**（从你按 `Ctrl+Alt+D` 到按 `Esc` 结束）。它在本地实时算一个数字来判断角度，
-**画面一帧都不保存、不缓存、不上传**。程序退出后灯就灭了。
+默认情况下**只在效果运行期间亮**（从你按 `Ctrl+Alt+D` 到按 `Esc` 结束），程序退出后灯就灭了。
+它在本地实时算一个数字来判断角度，**画面一帧都不保存、不缓存、不上传**。
 
-之所以要按快捷键，正是因为摄像头指示灯是硬件直连的、软件关不掉。如果让它常年开着，你才能"直接合盖就跟随"，
-但那盏灯就会一直亮着——所以改成按一下"待命"，用完立刻灭。
+如果你在设置里打开了「**自动监测合盖**」，摄像头会在后台一直工作，指示灯也就一直亮着——
+这是为了换"直接合盖就跟随"。这一项**默认关闭**；不想要灯常亮，就别开它，继续用快捷键即可。
 
 **按了 `Ctrl+Alt+D` 没反应？**
 
@@ -128,6 +130,11 @@ MacBook 有专门的合盖角度传感器，所以它的效果能严丝合缝跟
 
 还有一个「**平整区间**」：静止角两侧这个范围内画面**完全平整、零模糊**，
 适合你工作时盖子会在一个小范围里活动的情况。
+
+以及一个可选的「**自动监测合盖**」（**默认关闭**）：打开后摄像头会一直工作，盖子合到设定的相对行程时
+**自动开始折叠**，不用再按快捷键。下面的「**自动触发行程**」和「**重新待命行程**」控制多早触发、
+以及一次结束后盖子要回到多开才会再次触发；两者都是**相对**行程（相对开启监测时盖子的位置），
+不是绝对的铰链角度。代价是开启期间摄像头指示灯会一直亮着。
 
 ![设置面板](docs/settings.png)
 
@@ -236,6 +243,7 @@ npm run selftest          # 把效果在九个角度上渲染成 PNG
 npm run selftest:real     # 同上，但用真实截屏
 npm run verify            # 播放一次，证明覆盖层确实压在桌面之上
 npm run verify:camera     # 不用摄像头也不用盖子，跑通整条实时追踪链路
+npm run verify:monitor    # 同上，验证常驻自动监测的触发、单流复用、重新待命与关闭
 npm run diagnose:cover    # 把覆盖层涂成纯红，逐点检查它盖住了整个屏幕
 npm run shot:fold         # 真实屏幕在六个折角下的截图
 npm run check:settings    # 中英双语构建设置页并往返读写
@@ -268,6 +276,7 @@ src/main/            Electron 主进程
   selftest.js          把各角度渲染成 PNG
   verify.js            证明覆盖层合成在桌面之上
   verify-camera.js     不用摄像头也不用盖子，验证实时链路
+  verify-monitor.js    不用摄像头也不用盖子，验证常驻自动监测
   diagnose-cover.js    证明覆盖层盖住了整个屏幕
   shot-fold.js         真实屏幕在各折角下的截图
   timing.js            测量待命延迟
@@ -287,8 +296,8 @@ tools/               打包、快捷方式、抽帧、文档配图等
 
 ### 已知限制
 
-- **待命需要按一下快捷键。** 摄像头指示灯是硬件直连、软件关不掉的，所以摄像头只在一次运行期间工作。
-  这排除了"直接合盖就跟随"。
+- **待命默认需要按一下快捷键。** 摄像头指示灯是硬件直连、软件关不掉的，所以默认只在一次运行期间工作。
+  想要"直接合盖就跟随"，可以在设置里打开可选的「自动监测合盖」（默认关闭），代价是指示灯会一直亮着。
 - **约 0.5 秒待命延迟**，几乎全部是 Chromium 那一次性的截屏。
 - **追踪器需要有东西可看。** 整个画面是一面白墙时它没有东西可以做相关，读数里的 `q` 会说这件事。
 - **独占全屏程序**盖不住，全屏游戏会把覆盖层整个遮掉。
@@ -374,14 +383,18 @@ critically damped spring to smooth it.
 **Verification.** `npm run selftest` renders the effect at nine angles to PNG; `verify` and
 `diagnose:cover` prove the overlay composites above the desktop and covers the whole screen;
 `verify:camera` drives the entire live path against a generated scene, with no camera and no
-hand. These have caught a tracker following a known displacement with the wrong sign, a fold
+hand; `verify:monitor` drives the optional persistent monitor through the same generated scene,
+checking its relative trigger, one-stream reuse, re-arm and shutdown. These have caught a tracker
+following a known displacement with the wrong sign, a fold
 that never happened because the direction of travel was assumed, and a strip at the top of the
 screen where the contracted picture left the untouched desktop showing through. Every run also
 writes a 100 ms trace to `last-run.json`, which is how a stepping unfold was found.
 
-**Limitations.** Arming needs a hotkey, because the camera light is hardware-wired and cannot be
-on permanently. Roughly 0.5 s of arming latency, almost all of it Chromium's one-shot screen
-grab. The tracker needs something to look at. No HDR colour management. One display at a time.
+**Limitations.** Arming needs a hotkey by default, because the camera light is hardware-wired and
+cannot be switched off in software. An optional, off-by-default "automatic monitor" keeps one
+camera stream open so a close starts the fold on its own, at the cost of the light staying on.
+Roughly 0.5 s of arming latency, almost all of it Chromium's one-shot screen grab. The tracker
+needs something to look at. No HDR colour management. One display at a time.
 
 **Licence.** Apache-2.0. A Windows port of [Mac Duo](https://github.com/sumimakito/Mac-Duo) by
 Makito; see `NOTICE` for the attribution and the per-file list of changes.

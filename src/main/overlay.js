@@ -21,6 +21,12 @@ class Overlay {
     this.win = null;
     this.loaded = null;
     this.displayMode = displayMode;
+    /** Called when the page dies underneath us, with a reason and details. */
+    this.onGone = null;
+    /** True while reset() is deliberately tearing the page down. */
+    this.destroying = false;
+    /** Test seam: makes requestExit a no-op so the watchdog path can be forced. */
+    this.ignoreExitForTest = false;
   }
 
   targetDisplay() {
@@ -73,6 +79,8 @@ class Overlay {
 
     win.on('closed', () => {
       this.win = null;
+      // An intentional reset() must not look like a crash to the main process.
+      if (!this.destroying && this.onGone) this.onGone('closed', null);
     });
 
     // Errors in the page would otherwise vanish into a transparent window.
@@ -86,6 +94,7 @@ class Overlay {
     });
     win.webContents.on('render-process-gone', (_event, details) => {
       console.error(`[win-duo] overlay renderer gone: ${JSON.stringify(details)}`);
+      if (!this.destroying && this.onGone) this.onGone('render-process-gone', details);
     });
 
     this.loaded = new Promise((resolve) => {
@@ -151,12 +160,48 @@ class Overlay {
    * fading out. Hide is done by the main process when the page reports back.
    */
   requestExit() {
+    if (this.ignoreExitForTest) return;
     if (!this.win || this.win.isDestroyed()) return;
     this.win.webContents.send('wd:exit');
   }
 
+  /**
+   * Tears the page down so the next ensure() rebuilds it. Used when a run has
+   * stopped responding or the renderer is gone, where the old page cannot be
+   * trusted to release the camera or the run.
+   */
+  reset() {
+    this.destroying = true;
+    try {
+      if (this.win && !this.win.isDestroyed()) this.win.destroy();
+    } finally {
+      this.win = null;
+      this.loaded = null;
+      this.destroying = false;
+    }
+  }
+
   sendSettings(settings) {
     if (this.win && !this.win.isDestroyed()) this.win.webContents.send('wd:settings', settings);
+  }
+
+  /**
+   * Turns the persistent monitor on (or updates its settings) in the page. The
+   * page owns the single camera stream; the main process only describes it.
+   */
+  async startMonitor(config) {
+    const win = await this.ensure();
+    win.webContents.send('wd:monitor-start', config);
+  }
+
+  /** Closes the monitor stream, unless a run is mid-flight and still owns it. */
+  stopMonitor(payload) {
+    if (this.win && !this.win.isDestroyed()) this.win.webContents.send('wd:monitor-stop', payload || {});
+  }
+
+  /** The automatic run could not start; keep watching from the same stream. */
+  resumeMonitor(payload) {
+    if (this.win && !this.win.isDestroyed()) this.win.webContents.send('wd:monitor-resume', payload || {});
   }
 
   hide() {

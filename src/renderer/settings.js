@@ -25,6 +25,11 @@
       // label here would invite people to interpret it as something physical.
       { key: 'fullTravel', min: 60, max: 400, step: 5 },
     ],
+    'monitor-section': [
+      // Relative to the baseline taken when monitoring started, not absolute.
+      { key: 'monitorTriggerAngle', min: 1, max: 60, step: 1, unit: '°' },
+      { key: 'monitorRearmAngle', min: 0, max: 30, step: 1, unit: '°' },
+    ],
     'angle-section': [
       { key: 'thresholdAngle', min: 40, max: 120, step: 1, unit: '°' },
       { key: 'blurSpan', min: 10, max: 100, step: 1, unit: '°' },
@@ -48,6 +53,99 @@
   const controls = new Map();
   let applying = false;
   let saveTimer = 0;
+
+  const cameraSelect = document.getElementById('camera-device');
+  /** The last settings the page was given, so the camera picker can be rebuilt. */
+  let currentSettings = {};
+  /**
+   * Deterministic hook for the settings smoke test. While a list is supplied it
+   * replaces the live enumeration, so the picker can be checked with no camera
+   * attached and no permission prompt.
+   */
+  let cameraDeviceOverride = null;
+  /**
+   * Monotonic token for the live enumeration. A slow earlier call must never
+   * overwrite the list a newer call (or the test override) has already drawn.
+   */
+  let cameraRequest = 0;
+
+  /**
+   * Fills the camera picker from a device list. It never opens a camera: the
+   * labels come from enumerateDevices, and a device that is busy or not yet
+   * permitted simply shows its generic name.
+   *
+   * The system default is always first. A saved id that is no longer connected
+   * is kept as an explicit entry instead of silently resetting the choice, so
+   * the panel can say why the effect is not following the chosen camera.
+   */
+  function renderCameraDevices(devices) {
+    if (!cameraSelect) return;
+    const inputs = (devices || []).filter(
+      (device) => device.kind === 'videoinput' && device.deviceId,
+    );
+    const saved = currentSettings.cameraDeviceId || '';
+
+    cameraSelect.textContent = '';
+    const addOption = (value, label) => {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = label;
+      cameraSelect.append(option);
+    };
+
+    addOption('', t('params.cameraDevice.default'));
+    inputs.forEach((device, index) => {
+      const label = device.label || `${t('params.cameraDevice.generic')} ${index + 1}`;
+      addOption(device.deviceId, label);
+    });
+    if (saved && !inputs.some((device) => device.deviceId === saved)) {
+      addOption(saved, t('params.cameraDevice.unavailable'));
+    }
+
+    cameraSelect.value = saved;
+    if (cameraSelect.value !== saved) cameraSelect.value = '';
+  }
+
+  /** Enumerates the video inputs. Opens no camera, so no light comes on. */
+  async function refreshCameraDevices() {
+    if (!cameraSelect) return;
+    if (cameraDeviceOverride) {
+      renderCameraDevices(cameraDeviceOverride);
+      return;
+    }
+    if (!navigator.mediaDevices || typeof navigator.mediaDevices.enumerateDevices !== 'function') {
+      renderCameraDevices([]);
+      return;
+    }
+    const request = (cameraRequest += 1);
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      // A newer request, or the test override, has already rendered.
+      if (request !== cameraRequest) return;
+      renderCameraDevices(devices);
+    } catch (error) {
+      if (request !== cameraRequest) return;
+      renderCameraDevices([]);
+    }
+  }
+
+  if (cameraSelect) {
+    window.__winDuoCameraDevices = {
+      override(devices, selectedId) {
+        cameraDeviceOverride = Array.isArray(devices) ? devices.slice() : null;
+        if (selectedId !== undefined) {
+          currentSettings = { ...currentSettings, cameraDeviceId: selectedId };
+        }
+        // Invalidate any enumeration that is still in flight so it cannot
+        // overwrite the deterministic list.
+        cameraRequest += 1;
+        renderCameraDevices(cameraDeviceOverride || []);
+      },
+    };
+    if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
+      navigator.mediaDevices.addEventListener('devicechange', refreshCameraDevices);
+    }
+  }
 
   function format(value, spec) {
     const decimals = String(spec.step).includes('.') ? String(spec.step).split('.')[1].length : 0;
@@ -101,6 +199,7 @@
 
   function apply(settings) {
     applying = true;
+    currentSettings = settings;
 
     for (const [key, control] of controls) {
       if (key in settings) {
@@ -117,6 +216,10 @@
     }
 
     applying = false;
+
+    // The camera list is rebuilt from the saved id, so a camera that has since
+    // been unplugged shows up as such rather than quietly changing the choice.
+    refreshCameraDevices();
   }
 
   // Static text first, so the panel is readable even if a setting fails to load.

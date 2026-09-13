@@ -17,6 +17,27 @@ const DEFAULTS = {
   // the scripted animation. The camera falls back to the sweep by itself if it
   // cannot be opened.
   angleSource: 'camera',
+  // Which video input the camera tracker opens, as a MediaDevices device id.
+  // '' means the system default. A saved id that is no longer connected makes
+  // the tracker fall back to the default camera for the run, and then to the
+  // sweep if even that fails.
+  cameraDeviceId: '',
+
+  // --- Persistent monitor ------------------------------------------------
+  // Off by default, and deliberately so: when on, the overlay keeps one camera
+  // stream open between runs so a close can start the fold without the hotkey.
+  // The camera light then stays on the whole time, which is a real privacy
+  // cost and exactly why this is opt-in.
+  persistentMonitor: false,
+  // Relative degrees of lid travel below the position the lid was at when the
+  // monitor started. This is NOT an absolute hinge angle: the zero point is
+  // wherever the lid happened to be when monitoring began. A complete close is
+  // about restAngle degrees of travel, so 12 is a small part of one.
+  monitorTriggerAngle: 12,
+  // The relative angle the lid must come back within, after a run, before the
+  // monitor will trigger again. Kept below monitorTriggerAngle for hysteresis,
+  // so a lid resting near the trigger cannot fire over and over.
+  monitorRearmAngle: 5,
   // Degrees the lid stands at when the effect arms. A 16" laptop flat on a desk
   // faces a seated user at roughly this angle, and the effect's trigger angle
   // should match it, so that closing the lid an inch starts the fold.
@@ -166,4 +187,28 @@ function sweepShutAngle(prefs) {
   return Math.max(prefs.thresholdAngle - prefs.blurSpan * prefs.sweepOvershoot, 5);
 }
 
-module.exports = { DEFAULTS, sweepOpenAngle, sweepShutAngle };
+/**
+ * Clamps a possibly-missing numeric setting without ever returning NaN.
+ * A settings file edited by hand, or an IPC patch from a page, can hold a
+ * string, null or NaN; none of those may reach the monitor maths.
+ */
+function clampNumber(value, min, max, fallback) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.min(max, Math.max(min, number));
+}
+
+/**
+ * The persistent-monitor angles, clamped to sane ranges. The rearm angle is
+ * forced strictly below the trigger so hysteresis always exists, whatever a
+ * hand-edited settings.json holds. Pure, so the policy can be checked without
+ * a camera or a window.
+ */
+function monitorAngles(settings) {
+  const source = settings || {};
+  const triggerAngle = clampNumber(source.monitorTriggerAngle, 1, 90, 12);
+  const rearmAngle = clampNumber(source.monitorRearmAngle, 0, triggerAngle - 0.5, 5);
+  return { triggerAngle, rearmAngle };
+}
+
+module.exports = { DEFAULTS, sweepOpenAngle, sweepShutAngle, clampNumber, monitorAngles };
